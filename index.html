@@ -8,9 +8,1094 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#ffffff">
 <script>
-/* 網站設定：api ＝ Apps Script 部署網址（…/exec）。留空時只能用「本機預覽」。 */
-window.ISH_CONFIG = { api: "https://script.google.com/macros/s/AKfycby8k9IIjY0YzzlMYE7YQyV9PYnanihiC10HJdaiLk2h4znweUm5ph1-jZDykDgdH-M2/exec" };
+/* 網站設定：firebase ＝ Firebase 網頁應用程式設定；payUrl ＝ 綠界雲端函式網址。留空時只能用「本機預覽」。 */
+window.ISH_CONFIG = {"firebase": {"apiKey": "AIzaSyDAC9wF1BHOe6CurFY0OgJNtUIWAUnNQxw", "authDomain": "ish-sales.firebaseapp.com", "projectId": "ish-sales", "storageBucket": "ish-sales.firebasestorage.app", "messagingSenderId": "612921376676", "appId": "1:612921376676:web:0f803206745222c4c94b31"}, "payUrl": "https://pay-612921376676.asia-east1.run.app"};
 </script>
+<script>
+/**
+ * -ish 銷售與庫存系統 v6 — 共用邏輯（在瀏覽器裡執行）
+ * ------------------------------------------------------------
+ * 資料存在 Firebase（Firestore），由 db-firestore.js 提供 DB；本機預覽用 db-memory.js。
+ * 綠界付款單與付款通知由雲端函式（functions/index.js）處理，金鑰不會出現在網頁裡。
+ */
+
+const TZ = 'Asia/Taipei';
+const OWNER_EMAIL = 'ishgoodsservice@gmail.com'; // 系統擁有者：第一次登入時自動成為管理者
+
+const SHEETS = {
+  products:  { name: '品項', cols: ['id','name','spec','price','cost','unit','active','sort','safety','createdAt'],
+               heads: ['ID','名稱','規格','售價','成本','單位','上架','排序','安全庫存','建立時間'] },
+  images:    { name: '圖片', cols: ['key','dataUrl'], heads: ['項目','圖片資料（自動產生，請勿編輯）'] },
+  locations: { name: '倉儲位置', cols: ['id','name','note','sort'], heads: ['ID','名稱','說明','排序'] },
+  stock:     { name: '庫存', cols: ['productId','locationId','qty','updatedAt'], heads: ['品項ID','位置ID','數量','更新時間'] },
+  sessions:  { name: '活動場次', cols: ['id','date','name','target','note','sort','start','end'], heads: ['ID','日期','場次','預估售出','備註','排序','開始','結束'] },
+  bundles:   { name: '組合優惠', cols: ['id','name','size','price','productIds','active','sort'], heads: ['ID','名稱','件數','組合價','適用品項ID（逗號分隔，空白＝全部）','啟用','排序'] },
+  staff:     { name: '銷售人員', cols: ['id','name','locationId','active','sort','createdAt'], heads: ['ID','名稱','預設倉儲','啟用','排序','建立時間'] },
+  orders:    { name: '訂單', cols: ['time','orderId','sessionId','sessionName','staffId','staffName','locationId','locationName','payment','units','preUnits','sets','setsText','setsJson','subtotal','discount','total','preorderAmount','collected','customer','phone','note','status','device','clientId','payStatus','cashReceived','change','address','payKey','editedAt','confirmed','confirmedBy','confirmedAt'],
+               heads: ['時間','訂單編號','場次ID','場次','帳號ID','銷售人員','出貨位置ID','出貨位置','付款方式','現貨件數','預購件數','組數','組合','組合明細','小計','組合折扣','營收（現貨）','預購金額','本次收款','客人','電話','備註','狀態','裝置','clientId','收款狀態','實收現金','找零','地址','付款代碼','最後修改','收款確認','確認人','確認時間'] },
+  items:     { name: '訂單明細', cols: ['time','orderId','productId','productName','kind','qty','listPrice','amount','sessionId','staffName','locationId','status'],
+               heads: ['時間','訂單編號','品項ID','品項','類型','數量','原價','實收金額','場次ID','銷售人員','出貨位置ID','狀態'] },
+  stockLog:  { name: '庫存異動', cols: ['time','productId','productName','locationId','locationName','delta','balance','reason','ref'],
+               heads: ['時間','品項ID','品項','位置ID','位置','變動','結存','原因','參照'] },
+  payments:  { name: '綠界付款', cols: ['time','tradeNo','orderId','amount','status','rtnCode','rtnMsg','ecpayTradeNo','paymentType','paymentDate','simulate'],
+               heads: ['建立時間','綠界訂單編號','訂單編號','金額','狀態','RtnCode','RtnMsg','綠界交易編號','付款方式','付款時間','模擬付款'] },
+  materials: { name: '簡介PDF', cols: ['id','name','path','size','updated'], heads: ['ID','名稱','路徑','大小','更新時間'] },
+  qrcodes:   { name: '介紹QR', cols: ['id','title','note','url','image','active','sort'], heads: ['ID','標題','說明','連結','圖片（自動產生）','顯示','排序'] },
+  settings:  { name: '設定', cols: ['key','value'], heads: ['項目','值（JSON）'] },
+};
+
+const DEFAULTS = {
+  appName: '-ish',
+  announcement: '',
+  accent: '#E74118',
+  eventName: '',
+  eventNote: '',
+  totalTarget: 0,
+  unit: '件',
+  payments: ['現金', '轉帳', 'LINE Pay'],
+  show: { today: true, stats: true, stock: true, progress: true },
+  allowPriceEdit: false,
+  allowPreorder: true,
+  preorderPaid: false,
+  preorderContact: true,
+  lowStock: 3,
+  defaultLocationId: 'L-shop',
+  salesUrl: '',
+  adminUrl: '',
+  apiUrl: '',
+  autoSession: true,
+  staffEdit: true,
+  preorderAddress: false,
+  cashName: '現金',
+  ecpayEnabled: false,
+  ecpayName: '綠界掃碼',
+};
+
+/* ============================================================
+ * 頁面與初始化
+ * ============================================================ */
+/** 不需登入：後台登入畫面需要的設定 */
+function apiPublicConfig() {
+  const imgs = imageMap_(), st = settings_();
+  return { appName: st.appName, logo: imgs.logo || '', accent: st.accent };
+}
+
+function setup(email) {
+  email = String(email || '').toLowerCase();
+  if (email && admins_().indexOf(email) < 0) setAdmins_(admins_().concat([email]));
+  writeSettings_(settings_());
+  if (!read_('locations').length) {
+    append_('locations', [
+      { id: 'L-main', name: '主倉', note: '工作室倉庫', sort: 1 },
+      { id: 'L-shop', name: '門市', note: '現場銷售用', sort: 2 },
+    ]);
+  }
+  if (!read_('staff').length) append_('staff', [{ id: 'U' + newId_(), name: '店長', locationId: 'L-shop', active: true, sort: 1, createdAt: new Date() }]);
+}
+/** 第一次使用：系統擁有者登入後建立管理者名單，並匯入 VGhouse 範本 */
+function apiFirstRun() {
+  const email = String(DB.email() || '').toLowerCase();
+  if (!email) throw new Error('NO_GOOGLE');
+  if (admins_().length) { admin_(); } else if (email !== OWNER_EMAIL) throw new Error('第一次使用請用 ' + OWNER_EMAIL + ' 登入');
+  setupVGhouseTemplate(email);
+  return true;
+}
+
+/** 選用：匯入 VGhouse 展覽範本（場次、目標、亮面／霧面、2 隻組）。可重複執行，不會重複建立。 */
+function setupVGhouseTemplate(email) {
+  setup(email);
+  const st = settings_();
+  st.eventName = 'VGhouse 展覽';
+  st.eventNote = '只記錄銷售；財務與對帳由祐齊處理。';
+  st.unit = '隻';
+  st.totalTarget = 1000;
+  writeSettings_(st);
+  const ps = read_('products');
+  const ensure = function (name, spec) {
+    const hit = ps.filter(function (p) { return p.name === name && p.spec === spec; })[0];
+    if (hit) return String(hit.id);
+    return apiSaveProduct_raw_({ name: name, spec: spec, price: 1380, unit: '隻', active: true });
+  };
+  const a = ensure('Coin Cat', '亮面'), b = ensure('Coin Cat', '霧面');
+  if (!read_('bundles').length) {
+    append_('bundles', [{ id: 'B' + newId_(), name: '2 隻組', size: 2, price: 2500, productIds: [a, b].join(','), active: true, sort: 1 }]);
+  }
+  if (!read_('sessions').length) {
+    append_('sessions', [
+      ['2026-12-08', '貴賓場（週二）'], ['2026-12-11', '活動第 1 天（週五）'], ['2026-12-12', '活動第 2 天（週六）'],
+      ['2026-12-13', '活動第 3 天（週日）'], ['2026-12-14', '活動第 4 天（週一）'],
+    ].map(function (x, i) { return { id: 'S' + newId_() + i, date: x[0], name: x[1], target: 200, note: i === 0 ? '貴賓場是否販售待 VG 確認' : '', sort: i + 1, start: '00:00', end: '23:59' }; }));
+  }
+}
+
+/* ============================================================
+ * 銷售人員登入（只選名字，不需密碼）
+ * ============================================================ */
+function apiLoginInfo() {
+  const imgs = imageMap_(), st = settings_();
+  return {
+    settings: { appName: st.appName, logo: imgs.logo || '', accent: st.accent },
+    staff: staffOut_().filter(function (u) { return u.active; }).map(function (u) { return { id: u.id, name: u.name }; }),
+  };
+}
+
+/* ============================================================
+ * 銷售端
+ * ============================================================ */
+function apiBootstrap(sid) {
+  const acc = staff_(sid);
+  const imgs = imageMap_();
+  return {
+    user: { id: acc.id, name: acc.name, locationId: String(acc.locationId || '') },
+    settings: settingsOut_(imgs),
+    products: read_('products').filter(function (p) { return isTrue_(p.active); }).map(function (p) { return productOut_(p, imgs); }).sort(bySort_),
+    locations: locationsOut_(),
+    stock: stockMap_(),
+    bundles: bundlesOut_().filter(function (b) { return b.active; }),
+    sessions: sessionsOut_(),
+    summary: summary_(acc),
+  };
+}
+
+function apiSummary(sid) {
+  const acc = staff_(sid);
+  return { summary: summary_(acc), stock: stockMap_() };
+}
+
+/** 銷售端「倉儲」分頁：各倉儲庫存＋最近異動 */
+function apiStockInfo(sid) {
+  staff_(sid);
+  return {
+    stock: stockMap_(),
+    log: read_('stockLog').slice(-40).reverse().map(function (l) {
+      return { time: ms_(l.time), productId: String(l.productId), productName: String(l.productName), locationId: String(l.locationId), locationName: String(l.locationName),
+               delta: num_(l.delta), balance: num_(l.balance), reason: String(l.reason) };
+    }),
+  };
+}
+
+function apiTodayOrders(sid, all) {
+  const acc = staff_(sid);
+  const t = today_();
+  const orders = read_('orders').filter(function (o) {
+    return o.time instanceof Date && dfmt_(o.time) === t && (all || String(o.staffId) === String(acc.id));
+  }).map(orderOut_);
+  const ids = {}; orders.forEach(function (o) { ids[o.orderId] = o; o.items = []; });
+  read_('items').forEach(function (i) { const o = ids[String(i.orderId)]; if (o) o.items.push(itemOut_(i)); });
+  return orders.reverse();
+}
+
+function apiRecordSale(sid, order) {
+  const acc = staff_(sid);
+  if (!order || !order.lines || !order.lines.length) throw new Error('沒有選擇品項');
+  const st = settings_();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    if (order.clientId) {
+      const dup = read_('orders').filter(function (o) { return o.clientId === order.clientId; })[0];
+      if (dup) return { orderId: String(dup.orderId), duplicate: true, order: orderWithItems_(dup), summary: summary_(acc), stock: stockMap_() };
+    }
+    const b = buildOrder_(acc, order, st, null);
+    const orderId = Utilities.formatDate(b.time, TZ, 'yyMMdd-HHmmss') + '-' + randKey_().slice(0, 5).toUpperCase();
+    const row = Object.assign({ time: b.time, orderId: orderId, staffId: acc.id, staffName: acc.name, status: '正常',
+      device: String(order.device || '').slice(0, 40), clientId: order.clientId || '', editedAt: '' }, b.fields);
+    if (b.ecpay) row.payKey = randKey_();
+    append_('orders', [row]);
+    append_('items', b.items(orderId));
+    applyStock_(b.stockOut(orderId, '銷售（' + acc.name + '）'));
+    return { orderId: orderId, order: orderWithItems_(row), summary: summary_(acc), stock: stockMap_() };
+  } finally { lock.releaseLock(); }
+}
+
+/** 新增與修改訂單共用：計算價格、組合、場次、收款 */
+function buildOrder_(acc, order, st, base) {
+  const pmap = indexBy_(read_('products'), 'id'), locs = indexBy_(read_('locations'), 'id');
+  const loc = locs[base ? base.locationId : order.locationId] || locs[acc.locationId];
+  if (!loc) throw new Error('找不到出貨倉儲，請在「我」重新選擇');
+  const sessions = sessionsOut_();
+  const time = base ? base.time : (order.time ? new Date(order.time) : new Date());
+  let sess = null;
+  if (base) sess = sessions.filter(function (s) { return s.id === base.sessionId; })[0] || null;
+  else if (st.autoSession) sess = sessionAt_(sessions, time);
+  else if (order.sessionId) sess = sessions.filter(function (s) { return s.id === order.sessionId; })[0] || null;
+  else if (order.sessionId === undefined) sess = currentSession_(sessions, time, st);
+  const lines = order.lines.map(function (l) {
+    const p = pmap[l.productId];
+    if (!p) throw new Error('找不到品項：' + l.productId);
+    const qty = Math.max(1, Math.round(Number(l.qty) || 0));
+    const price = st.allowPriceEdit && l.price !== undefined && l.price !== '' ? Math.max(0, Number(l.price) || 0) : num_(p.price);
+    const kind = st.allowPreorder && l.kind === '預購' ? '預購' : '現貨';
+    return { productId: String(p.id), qty: qty, price: price, kind: kind, name: p.name + (p.spec ? '／' + p.spec : '') };
+  });
+  const pr = priceCart_(lines, bundlesOut_().filter(function (b) { return b.active; }), order.sets || {});
+  const sum = function (kind, f) { return pr.lines.filter(function (l) { return l.kind === kind; }).reduce(function (a, l) { return a + l[f]; }, 0); };
+  const revenue = sum('現貨', 'net'), preAmt = sum('預購', 'net');
+  const hasPre = pr.lines.some(function (l) { return l.kind === '預購'; });
+  const customer = String(order.customer || '').trim(), phone = String(order.phone || '').trim(), address = String(order.address || '').trim();
+  if (hasPre && st.preorderContact && !customer && !phone) throw new Error('預購需要填寫客人姓名或電話');
+  if (hasPre && st.preorderAddress && !address) throw new Error('預購需要填寫地址');
+  const collected = revenue + (st.preorderPaid ? preAmt : 0);
+  const payment = String(order.payment || '');
+  const ecpay = isEcpay_(st, payment);
+  if (ecpay && (!st.salesUrl || !st.apiUrl)) throw new Error('請管理者先在「系統」填入網站網址與綠界函式網址，才能使用綠界掃碼付款');
+  if (ecpay && collected <= 0) throw new Error('本次收款為 0，不需要綠界付款');
+  const isCash = payment === st.cashName;
+  const received = isCash && order.cashReceived !== undefined && order.cashReceived !== '' && order.cashReceived !== null ? Math.round(Number(order.cashReceived)) : '';
+  if (received !== '' && received < collected) throw new Error('實收金額不足');
+  const setsObj = {}; pr.applied.forEach(function (a) { if (a.sets) setsObj[a.id] = a.sets; });
+  const sid = sess ? sess.id : '';
+  const noPay = collected <= 0;
+  const confirmed = noPay || (isCash && received !== '') || (!ecpay && !isCash && order.confirmed === true);
+  return {
+    time: time, ecpay: ecpay, collected: collected,
+    fields: {
+      sessionId: sid, sessionName: sess ? sess.name : '一般銷售', locationId: loc.id, locationName: loc.name, payment: payment,
+      units: sum('現貨', 'qty'), preUnits: sum('預購', 'qty'),
+      sets: pr.applied.reduce(function (a, x) { return a + x.sets; }, 0),
+      setsText: pr.applied.filter(function (a) { return a.sets; }).map(function (a) { return a.name + '×' + a.sets; }).join('、'),
+      setsJson: JSON.stringify(setsObj), subtotal: pr.subtotal, discount: pr.discount, total: revenue, preorderAmount: preAmt, collected: collected,
+      customer: customer, phone: phone, address: address, note: String(order.note || ''),
+      payStatus: ecpay ? '待付款' : '已收款', cashReceived: received, change: received === '' ? '' : received - collected, payKey: '',
+      confirmed: confirmed, confirmedBy: confirmed ? (noPay ? '（無需收款）' : acc.name) : '', confirmedAt: confirmed ? new Date() : '',
+    },
+    items: function (orderId) {
+      return pr.lines.map(function (l) {
+        return { time: time, orderId: orderId, productId: l.productId, productName: l.name, kind: l.kind, qty: l.qty,
+                 listPrice: l.price, amount: l.net, sessionId: sid, staffName: acc.name, locationId: loc.id, status: '正常' };
+      });
+    },
+    stockOut: function (orderId, reason) {
+      return pr.lines.filter(function (l) { return l.kind === '現貨'; }).map(function (l) {
+        return { productId: l.productId, locationId: loc.id, delta: -l.qty, reason: reason, ref: orderId };
+      });
+    },
+  };
+}
+
+/* ---- 銷售人員的「我的訂單」：查看、修改、刪除 ---- */
+function apiMyOrders(sid) {
+  const acc = staff_(sid);
+  const mine = read_('orders').filter(function (o) { return String(o.staffId) === acc.id; }).slice(-300).reverse();
+  const by = {}; read_('items').forEach(function (i) { (by[String(i.orderId)] = by[String(i.orderId)] || []).push(itemOut_(i)); });
+  return mine.map(function (o) { const x = orderOut_(o); x.items = by[x.orderId] || []; return x; });
+}
+function myOrder_(acc, orderId, forEdit) {
+  const o = read_('orders').filter(function (r) { return String(r.orderId) === String(orderId); })[0];
+  if (!o) throw new Error('找不到訂單');
+  if (String(o.staffId) !== acc.id) throw new Error('只能修改自己登記的訂單');
+  if (o.status === '作廢') throw new Error('這筆訂單已刪除');
+  if (forEdit && o.payStatus === '已付款' && isEcpay_(settings_(), String(o.payment))) throw new Error('已透過綠界付款的訂單無法在手機修改，請管理者在綠界後台處理退款後作廢');
+  return o;
+}
+function apiEditMyOrder(sid, orderId, order) {
+  const acc = staff_(sid), st = settings_();
+  if (!st.staffEdit) throw new Error('管理者未開放銷售端修改訂單');
+  if (!order || !order.lines || !order.lines.length) throw new Error('沒有品項；若要取消整筆訂單請按「刪除」');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const o = myOrder_(acc, orderId, true);
+    const b = buildOrder_(acc, order, st, { time: o.time, sessionId: String(o.sessionId), locationId: String(o.locationId) });
+    const old = read_('items').filter(function (r) { return String(r.orderId) === String(orderId); });
+    applyStock_(old.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
+      return { productId: r.productId, locationId: r.locationId, delta: num_(r.qty), reason: '修改訂單退回（' + acc.name + '）', ref: String(orderId) };
+    }));
+    deleteWhere_('items', function (r) { return String(r.orderId) === String(orderId); });
+    append_('items', b.items(String(orderId)));
+    applyStock_(b.stockOut(String(orderId), '修改訂單（' + acc.name + '）'));
+    const keepKey = String(o.payKey || '');
+    Object.assign(o, b.fields);
+    o.payKey = b.ecpay ? (keepKey || randKey_()) : '';
+    o.editedAt = new Date();
+    update_('orders', o);
+    return { order: orderWithItems_(o), summary: summary_(acc), stock: stockMap_() };
+  } finally { lock.releaseLock(); }
+}
+function apiVoidMyOrder(sid, orderId) {
+  const acc = staff_(sid), st = settings_();
+  if (!st.staffEdit) throw new Error('管理者未開放銷售端刪除訂單');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    myOrder_(acc, orderId, true);
+    voidOrder_(orderId, acc.name);
+    return { summary: summary_(acc), stock: stockMap_() };
+  } finally { lock.releaseLock(); }
+}
+
+/* ---- 綠界掃碼付款 ---- */
+function apiPayStatus(sid, orderId) {
+  staff_(sid);
+  const o = read_('orders').filter(function (r) { return String(r.orderId) === String(orderId); })[0];
+  if (!o) throw new Error('找不到訂單');
+  return { payStatus: String(o.payStatus || ''), status: String(o.status) };
+}
+/** 收款二次確認（任何銷售人員都可以確認，會記錄確認人與時間） */
+function apiConfirmPayment(sid, orderId) {
+  const acc = staff_(sid);
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { confirm_(orderId, acc.name); return { order: orderWithItems_(findOrder_(orderId)), summary: summary_(acc) }; }
+  finally { lock.releaseLock(); }
+}
+function apiAdminConfirm(orderId) {
+  const me = admin_();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { confirm_(orderId, me); return true; } finally { lock.releaseLock(); }
+}
+function findOrder_(orderId) { return read_('orders').filter(function (r) { return String(r.orderId) === String(orderId); })[0]; }
+function confirm_(orderId, who) {
+  const o = findOrder_(orderId);
+  if (!o || o.status === '作廢') throw new Error('找不到訂單或訂單已刪除');
+  if (isEcpay_(settings_(), String(o.payment)) && o.payStatus !== '已付款') throw new Error('綠界尚未顯示「已付款」，請確認客人已完成付款');
+  if (isTrue_(o.confirmed)) return;
+  setCell_('orders', o._row, 'confirmed', true);
+  setCell_('orders', o._row, 'confirmedBy', who);
+  setCell_('orders', o._row, 'confirmedAt', new Date());
+}
+
+/** 綠界付款改成其他方式（例如客人改付現金） */
+function apiSetPayment(sid, orderId, payment, cashReceived) {
+  const acc = staff_(sid), st = settings_();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const o = myOrder_(acc, orderId, true);
+    if (isEcpay_(st, payment)) throw new Error('請選擇其他付款方式');
+    const rec = payment === st.cashName && cashReceived !== undefined && cashReceived !== '' && cashReceived !== null ? Math.round(Number(cashReceived)) : '';
+    if (rec !== '' && rec < num_(o.collected)) throw new Error('實收金額不足');
+    o.payment = payment; o.payStatus = '已收款'; o.payKey = ''; o.cashReceived = rec; o.change = rec === '' ? '' : rec - num_(o.collected); o.editedAt = new Date();
+    o.confirmed = true; o.confirmedBy = acc.name; o.confirmedAt = new Date();
+    update_('orders', o);
+    return { order: orderWithItems_(o) };
+  } finally { lock.releaseLock(); }
+}
+function ecpayCfg_() { return DB.ecpayPublic(); }
+function isEcpay_(st, payment) { return !!st.ecpayEnabled && !!payment && payment === st.ecpayName; }
+function randKey_() { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, 24); }
+
+function apiMaterials(sid) {
+  if (sid === '__admin__') admin_(); else staff_(sid);
+  return { files: listMaterials_(), qrs: qrsOut_().filter(function (q) { return q.active; }) };
+}
+function apiMaterialData(sid, id) {
+  if (sid === '__admin__') admin_(); else staff_(sid);
+  const f = read_('materials').filter(function (r) { return String(r.id) === String(id); })[0];
+  if (!f) throw new Error('找不到這個檔案');
+  return DB.fileBase64(String(f.path));
+}
+
+/* ============================================================
+ * 後台（需管理者帳號）
+ * ============================================================ */
+function apiAdminData() {
+  const me = admin_();
+  const imgs = imageMap_();
+  const orderCount = {};
+  const orders = read_('orders').map(function (o) { orderCount[o.staffId] = (orderCount[o.staffId] || 0) + 1; return orderOut_(o); });
+  return {
+    me: { email: me },
+    settings: settingsOut_(imgs),
+    products: read_('products').map(function (p) { return productOut_(p, imgs); }).sort(bySort_),
+    locations: locationsOut_(),
+    stock: stockMap_(),
+    sessions: sessionsOut_(),
+    bundles: bundlesOut_(),
+    staff: staffOut_().map(function (u) { u.orders = orderCount[u.id] || 0; return u; }),
+    admins: admins_(),
+    owner: ownerEmail_(),
+    orders: orders,
+    items: read_('items').map(itemOut_),
+    stockLog: read_('stockLog').slice(-300).reverse().map(function (l) {
+      return { time: ms_(l.time), productName: String(l.productName), locationName: String(l.locationName),
+               delta: num_(l.delta), balance: num_(l.balance), reason: String(l.reason) };
+    }),
+    materials: listMaterials_(),
+    qrs: qrsOut_(),
+    ecpay: ecpayCfg_(),
+    links: DB.links(),
+  };
+}
+
+function apiSaveSettings(s) {
+  admin_();
+  const cur = settings_();
+  Object.keys(DEFAULTS).forEach(function (k) { if (s[k] !== undefined) cur[k] = s[k]; });
+  writeSettings_(cur);
+  if (s.logo !== undefined) saveImage_('logo', s.logo);
+  return settingsOut_(imageMap_());
+}
+
+/* 品項 */
+function apiSaveProduct(p) {
+  admin_();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { return apiSaveProduct_raw_(p); } finally { lock.releaseLock(); }
+}
+function apiSaveProduct_raw_(p) {
+  if (!p || !String(p.name || '').trim()) throw new Error('請輸入品項名稱');
+  const list = read_('products');
+  let row = p.id ? list.filter(function (x) { return String(x.id) === String(p.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'P' + newId_(), createdAt: new Date(), active: true, sort: list.reduce(function (m, x) { return Math.max(m, num_(x.sort)); }, 0) + 1 };
+  row.name = String(p.name).trim();
+  row.spec = String(p.spec || '').trim();
+  row.price = num_(p.price);
+  row.cost = blank_(p.cost) ? '' : num_(p.cost);
+  row.unit = String(p.unit || '').trim();
+  row.safety = blank_(p.safety) ? '' : num_(p.safety);
+  if (p.active !== undefined) row.active = !!p.active;
+  if (isNew) append_('products', [row]); else update_('products', row);
+  if (p.image !== undefined) saveImage_(row.id, p.image);
+  return String(row.id);
+}
+function apiSetActive(id, active) {
+  admin_();
+  const row = read_('products').filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!row) throw new Error('找不到品項');
+  setCell_('products', row._row, 'active', !!active);
+  return true;
+}
+function apiSaveOrder(kind, ids) {
+  admin_();
+  if (['products', 'sessions', 'bundles', 'locations', 'qrcodes'].indexOf(kind) < 0) throw new Error('bad kind');
+  const pos = {}; ids.forEach(function (id, i) { pos[id] = i + 1; });
+  read_(kind).forEach(function (r) { if (pos[r.id] !== undefined) setCell_(kind, r._row, 'sort', pos[r.id]); });
+  return true;
+}
+function apiDeleteProduct(id) {
+  admin_();
+  if (read_('items').some(function (s) { return String(s.productId) === String(id); })) {
+    throw new Error('這個品項已有銷售紀錄，不能刪除。請改為「隱藏」。');
+  }
+  deleteWhere_('products', function (r) { return String(r.id) === String(id); });
+  deleteWhere_('images', function (r) { return String(r.key) === String(id); });
+  deleteWhere_('stock', function (r) { return String(r.productId) === String(id); });
+  return true;
+}
+
+/* 組合優惠 */
+function apiSaveBundle(b) {
+  admin_();
+  if (!String(b.name || '').trim()) throw new Error('請輸入組合名稱');
+  const size = Math.round(Number(b.size));
+  if (!(size >= 2)) throw new Error('組合件數至少 2');
+  const list = read_('bundles');
+  let row = b.id ? list.filter(function (x) { return String(x.id) === String(b.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'B' + newId_(), sort: list.length + 1 };
+  row.name = String(b.name).trim(); row.size = size; row.price = num_(b.price);
+  row.productIds = (b.productIds || []).join(','); row.active = b.active !== false;
+  if (isNew) append_('bundles', [row]); else update_('bundles', row);
+  return String(row.id);
+}
+function apiDeleteBundle(id) {
+  admin_();
+  deleteWhere_('bundles', function (r) { return String(r.id) === String(id); });
+  return true;
+}
+
+/* 場次 */
+function apiSaveSession(s) {
+  admin_();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.date || ''))) throw new Error('請選擇日期');
+  const list = read_('sessions');
+  let row = s.id ? list.filter(function (x) { return String(x.id) === String(s.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'S' + newId_(), sort: list.length + 1 };
+  row.date = s.date; row.name = String(s.name || '').trim() || s.date; row.target = num_(s.target); row.note = String(s.note || '');
+  row.start = /^\d{2}:\d{2}$/.test(String(s.start || '')) ? s.start : '00:00';
+  row.end = /^\d{2}:\d{2}$/.test(String(s.end || '')) ? s.end : '23:59';
+  if (row.end < row.start) throw new Error('結束時間不能早於開始時間');
+  if (isNew) append_('sessions', [row]); else update_('sessions', row);
+  return String(row.id);
+}
+function apiDeleteSession(id) {
+  admin_();
+  deleteWhere_('sessions', function (r) { return String(r.id) === String(id); });
+  return true;
+}
+
+/* 銷售人員 */
+function apiSaveStaff(u) {
+  admin_();
+  const name = String(u.name || '').trim();
+  if (!name) throw new Error('請輸入名稱');
+  const list = read_('staff');
+  if (list.some(function (x) { return String(x.name) === name && String(x.id) !== String(u.id || ''); })) throw new Error('已經有同名的人員');
+  let row = u.id ? list.filter(function (x) { return String(x.id) === String(u.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'U' + newId_(), sort: list.length + 1, createdAt: new Date() };
+  row.name = name; row.locationId = u.locationId || ''; row.active = u.active !== false;
+  if (isNew) append_('staff', [row]); else update_('staff', row);
+  return String(row.id);
+}
+function apiDeleteStaff(id) {
+  admin_();
+  if (read_('orders').some(function (o) { return String(o.staffId) === String(id); })) throw new Error('這位人員已有訂單紀錄，請改為「停用」，紀錄才能保留來源。');
+  deleteWhere_('staff', function (r) { return String(r.id) === String(id); });
+  return true;
+}
+
+/* 管理者（Google 帳號） */
+function apiAddAdmin(email) {
+  admin_();
+  email = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('請輸入正確的 Google 帳號 Email');
+  if (admins_().indexOf(email) < 0) setAdmins_(admins_().concat([email]));
+  return admins_();
+}
+function apiRemoveAdmin(email) {
+  const me = admin_();
+  email = String(email || '').toLowerCase();
+  if (email === me) throw new Error('不能移除自己');
+  if (email === ownerEmail_()) throw new Error('不能移除試算表擁有者');
+  setAdmins_(admins_().filter(function (x) { return x !== email; }));
+  return admins_();
+}
+
+/* 倉儲與庫存 */
+function apiSaveLocation(l) {
+  admin_();
+  if (!String(l.name || '').trim()) throw new Error('請輸入位置名稱');
+  const list = read_('locations');
+  let row = l.id ? list.filter(function (x) { return String(x.id) === String(l.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'L' + newId_(), sort: list.length + 1 };
+  row.name = String(l.name).trim(); row.note = String(l.note || '');
+  if (isNew) append_('locations', [row]); else update_('locations', row);
+  return String(row.id);
+}
+function apiDeleteLocation(id) {
+  admin_();
+  if (read_('stock').some(function (s) { return String(s.locationId) === String(id) && num_(s.qty) !== 0; })) throw new Error('這個位置還有庫存，請先調撥或歸零再刪除。');
+  deleteWhere_('stock', function (r) { return String(r.locationId) === String(id); });
+  deleteWhere_('locations', function (r) { return String(r.id) === String(id); });
+  return true;
+}
+function apiAdjustStock(a) {
+  const me = admin_();
+  const q = Math.round(Number(a.qty));
+  if (isNaN(q)) throw new Error('數量不正確');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const c = { productId: a.productId, locationId: a.locationId, reason: (a.reason || (a.mode === 'set' ? '盤點' : '入庫／調整')) + '（' + me + '）', ref: '後台' };
+    if (a.mode === 'set') c.set = q; else c.delta = q;
+    applyStock_([c]);
+    return true;
+  } finally { lock.releaseLock(); }
+}
+function apiTransferStock(t) {
+  const me = admin_();
+  const q = Math.round(Number(t.qty));
+  if (!(q > 0)) throw new Error('調撥數量需大於 0');
+  if (t.from === t.to) throw new Error('來源與目的地相同');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const who = '（' + me + '）';
+    applyStock_([
+      { productId: t.productId, locationId: t.from, delta: -q, reason: (t.reason || '調撥出') + who, ref: '調撥' },
+      { productId: t.productId, locationId: t.to, delta: q, reason: (t.reason || '調撥入') + who, ref: '調撥' },
+    ]);
+    return true;
+  } finally { lock.releaseLock(); }
+}
+
+/* 訂單作廢 */
+function apiVoidOrder(orderId) {
+  const me = admin_();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { voidOrder_(orderId, me); return true; } finally { lock.releaseLock(); }
+}
+function voidOrder_(orderId, who) {
+  const o = read_('orders').filter(function (r) { return String(r.orderId) === String(orderId) && r.status !== '作廢'; })[0];
+  if (!o) throw new Error('找不到可作廢的訂單');
+  setCell_('orders', o._row, 'status', '作廢');
+  setCell_('orders', o._row, 'payKey', '');
+  const its = read_('items').filter(function (r) { return String(r.orderId) === String(orderId); });
+  its.forEach(function (r) { setCell_('items', r._row, 'status', '作廢'); });
+  applyStock_(its.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
+    return { productId: r.productId, locationId: r.locationId, delta: num_(r.qty), reason: '作廢退回（' + who + '）', ref: String(orderId) };
+  }));
+}
+
+/* 綠界設定（金鑰存在只有雲端函式讀得到的地方，網頁與後台都看不到） */
+function apiSaveEcpay(c) {
+  admin_();
+  return DB.saveEcpay({ mode: c.mode ? (c.mode === 'prod' ? 'prod' : 'stage') : undefined, mid: c.mid !== undefined ? String(c.mid).trim() : undefined,
+                        key: c.key ? String(c.key).trim() : undefined, iv: c.iv ? String(c.iv).trim() : undefined });
+}
+
+/* 介紹頁 QR code */
+function apiSaveQr(q) {
+  admin_();
+  if (!String(q.title || '').trim()) throw new Error('請輸入標題');
+  if (!String(q.url || '').trim() && !q.image) throw new Error('請輸入連結或上傳 QR 圖片');
+  if (q.image && String(q.image).length > 49000) throw new Error('圖片太大，請換一張');
+  const list = read_('qrcodes');
+  let row = q.id ? list.filter(function (x) { return String(x.id) === String(q.id); })[0] : null;
+  const isNew = !row;
+  if (isNew) row = { id: 'Q' + newId_(), sort: list.length + 1 };
+  row.title = String(q.title).trim(); row.note = String(q.note || ''); row.url = String(q.url || '').trim();
+  row.image = String(q.image || ''); row.active = q.active !== false;
+  if (isNew) append_('qrcodes', [row]); else update_('qrcodes', row);
+  return String(row.id);
+}
+function apiDeleteQr(id) { admin_(); deleteWhere_('qrcodes', function (r) { return String(r.id) === String(id); }); return true; }
+
+/* 簡介 PDF */
+function apiUploadMaterial(name, b64) {
+  admin_();
+  name = String(name || '簡介').replace(/[\\/]/g, '-').replace(/\.pdf$/i, '');
+  const id = 'M' + newId_(), path = 'materials/' + id + '.pdf';
+  return DB.putFile(path, b64, 'application/pdf').then(function (size) {
+    append_('materials', [{ id: id, name: name, path: path, size: size, updated: new Date() }]);
+    return listMaterials_();
+  });
+}
+function apiRenameMaterial(id, name) {
+  admin_();
+  const f = read_('materials').filter(function (r) { return String(r.id) === String(id); })[0];
+  if (!f) throw new Error('找不到這個檔案');
+  f.name = String(name).trim().replace(/\.pdf$/i, ''); f.updated = new Date();
+  update_('materials', f);
+  return listMaterials_();
+}
+function apiDeleteMaterial(id) {
+  admin_();
+  const f = read_('materials').filter(function (r) { return String(r.id) === String(id); })[0];
+  if (!f) return listMaterials_();
+  deleteWhere_('materials', function (r) { return String(r.id) === String(id); });
+  return DB.deleteFile(String(f.path)).then(function () { return listMaterials_(); }, function () { return listMaterials_(); });
+}
+
+/* ============================================================
+ * 價格計算（前後端共用同一段邏輯）
+ * ============================================================ */
+function priceCart_(lines, bundles, setsReq) {
+  const units = [];
+  lines.forEach(function (l, i) { for (let k = 0; k < l.qty; k++) units.push({ i: i, pid: l.productId, price: Number(l.price) || 0, net: Number(l.price) || 0, used: false }); });
+  const applied = [];
+  bundles.forEach(function (b) {
+    const ids = b.productIds || [];
+    const elig = units.filter(function (u) { return !u.used && (!ids.length || ids.indexOf(u.pid) >= 0); })
+      .sort(function (x, y) { return y.price - x.price; });
+    const max = Math.floor(elig.length / b.size);
+    if (!max) return;
+    const want = setsReq && setsReq[b.id] !== undefined && setsReq[b.id] !== null ? Math.floor(Number(setsReq[b.id]) || 0) : max;
+    const n = Math.max(0, Math.min(max, want));
+    let done = 0, saving = 0;
+    for (let s = 0; s < n; s++) {
+      const grp = elig.slice(s * b.size, (s + 1) * b.size);
+      const sum = grp.reduce(function (a, u) { return a + u.price; }, 0);
+      if (sum <= b.price) continue;
+      grp.forEach(function (u) { u.used = true; u.net = b.price * u.price / sum; });
+      saving += sum - b.price; done++;
+    }
+    applied.push({ id: b.id, name: b.name, size: b.size, price: b.price, sets: done, max: max, saving: Math.round(saving) });
+  });
+  const out = lines.map(function (l) { const o = {}; Object.keys(l).forEach(function (k) { o[k] = l[k]; }); o.net = 0; return o; });
+  units.forEach(function (u) { out[u.i].net += u.net; });
+  const subtotal = lines.reduce(function (a, l) { return a + l.qty * (Number(l.price) || 0); }, 0);
+  const total = Math.round(units.reduce(function (a, u) { return a + u.net; }, 0));
+  out.forEach(function (l) { l.net = Math.round(l.net); });
+  const drift = total - out.reduce(function (a, l) { return a + l.net; }, 0);
+  if (drift && out.length) out.reduce(function (m, l) { return l.net > m.net ? l : m; }, out[0]).net += drift;
+  return { lines: out, applied: applied, subtotal: subtotal, total: total, discount: subtotal - total };
+}
+
+/* ============================================================
+ * 內部工具
+ * ============================================================ */
+function read_(key) { return DB.read(key); }
+function append_(key, objs) { if (objs && objs.length) DB.append(key, objs); }
+function update_(key, o) { DB.update(key, o); }
+function setCell_(key, row, col, v) { DB.setField(key, row, col, v); }
+function deleteWhere_(key, fn) { read_(key).filter(fn).forEach(function (r) { DB.remove(key, r._row); }); }
+
+function settings_() {
+  const o = JSON.parse(JSON.stringify(DEFAULTS));
+  read_('settings').forEach(function (r) { try { o[r.key] = JSON.parse(r.value); } catch (e) { o[r.key] = r.value; } });
+  o.show = Object.assign({}, DEFAULTS.show, o.show || {});
+  return o;
+}
+function settingsOut_(imgs) { const s = settings_(); s.logo = imgs.logo || ''; return s; }
+function writeSettings_(obj) {
+  Object.keys(obj).filter(function (k) { return k !== 'logo'; }).forEach(function (k) { DB.put('settings', k, { key: k, value: JSON.stringify(obj[k]) }); });
+}
+
+function admins_() { return DB.admins(); }
+function setAdmins_(a) { DB.setAdmins(a); }
+function ownerEmail_() { return OWNER_EMAIL; }
+/** 後台權限：用 Firebase「使用 Google 帳號登入」的帳號判斷（Firestore 規則也會再檢查一次） */
+function admin_() {
+  const email = String(DB.email() || '').toLowerCase();
+  if (!email) throw new Error('NO_GOOGLE');
+  if (admins_().indexOf(email) < 0) throw new Error('NOT_ADMIN:' + email);
+  return email;
+}
+/** 銷售人員：只確認名字存在且啟用 */
+function staff_(sid) {
+  const u = read_('staff').filter(function (x) { return String(x.id) === String(sid || ''); })[0];
+  if (!u || !isTrue_(u.active)) throw new Error('STAFF_INVALID');
+  u.id = String(u.id); u.name = String(u.name);
+  return u;
+}
+function staffOut_() {
+  return read_('staff').map(function (u) { return { id: String(u.id), name: String(u.name), locationId: String(u.locationId || ''), active: isTrue_(u.active), sort: num_(u.sort) }; }).sort(bySort_);
+}
+
+function newId_() { return Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(); }
+function isTrue_(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
+function blank_(v) { return v === '' || v === null || v === undefined; }
+function num_(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+function ms_(d) { return d instanceof Date ? d.getTime() : (d ? new Date(d).getTime() || 0 : 0); }
+function dfmt_(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM-dd'); }
+function dstr_(v) { return v instanceof Date ? dfmt_(v) : String(v || ''); }
+function today_() { return dfmt_(new Date()); }
+function tstr_(v) { if (v instanceof Date) return Utilities.formatDate(v, TZ, 'HH:mm'); const m = String(v || '').match(/^(\d{1,2}):(\d{2})/); return m ? ('0' + m[1]).slice(-2) + ':' + m[2] : ''; }
+function sessionAt_(sessions, d) {
+  const day = dfmt_(d), hm = Utilities.formatDate(d, TZ, 'HH:mm');
+  return sessions.filter(function (s) { return s.date === day && s.start <= hm && hm <= s.end; })[0] || null;
+}
+function currentSession_(sessions, d, st) {
+  if (st.autoSession) return sessionAt_(sessions, d);
+  return sessions.filter(function (s) { return s.date === dfmt_(d); })[0] || null;
+}
+function orderWithItems_(o) {
+  const x = orderOut_(o);
+  x.items = read_('items').filter(function (i) { return String(i.orderId) === x.orderId; }).map(itemOut_);
+  return x;
+}
+function qrsOut_() {
+  return read_('qrcodes').map(function (q) { return { id: String(q.id), title: String(q.title), note: String(q.note || ''), url: String(q.url || ''), image: String(q.image || ''), active: isTrue_(q.active), sort: num_(q.sort) }; }).sort(bySort_);
+}
+function bySort_(a, b) { return a.sort - b.sort; }
+function indexBy_(arr, k) { const o = {}; arr.forEach(function (x) { o[String(x[k])] = x; }); return o; }
+
+function imageMap_() { const o = {}; read_('images').forEach(function (r) { o[String(r.key)] = String(r.dataUrl || ''); }); return o; }
+function saveImage_(key, dataUrl) {
+  dataUrl = String(dataUrl || '');
+  if (dataUrl.length > 49000) throw new Error('圖片太大，請換一張');
+  const row = read_('images').filter(function (r) { return String(r.key) === String(key); })[0];
+  if (!dataUrl) { if (row) DB.remove('images', row._row); return; }
+  if (row) { row.dataUrl = dataUrl; update_('images', row); } else append_('images', [{ key: key, dataUrl: dataUrl }]);
+}
+
+function productOut_(p, imgs) {
+  const id = String(p.id);
+  return { id: id, name: String(p.name), spec: String(p.spec || ''), price: num_(p.price), cost: blank_(p.cost) ? '' : num_(p.cost),
+           unit: String(p.unit || ''), active: isTrue_(p.active), sort: num_(p.sort), safety: blank_(p.safety) ? '' : num_(p.safety), image: imgs[id] || '' };
+}
+function locationsOut_() {
+  return read_('locations').map(function (l) { return { id: String(l.id), name: String(l.name), note: String(l.note || ''), sort: num_(l.sort) }; }).sort(bySort_);
+}
+function sessionsOut_() {
+  return read_('sessions').map(function (s) { return { id: String(s.id), date: dstr_(s.date), name: String(s.name), target: num_(s.target), note: String(s.note || ''), sort: num_(s.sort), start: tstr_(s.start) || '00:00', end: tstr_(s.end) || '23:59' }; })
+    .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : a.start < b.start ? -1 : a.start > b.start ? 1 : a.sort - b.sort; });
+}
+function bundlesOut_() {
+  return read_('bundles').map(function (b) {
+    return { id: String(b.id), name: String(b.name), size: num_(b.size), price: num_(b.price),
+             productIds: String(b.productIds || '').split(',').map(function (x) { return x.trim(); }).filter(String), active: isTrue_(b.active), sort: num_(b.sort) };
+  }).sort(bySort_);
+}
+function stockMap_() {
+  const o = {};
+  read_('stock').forEach(function (s) { const p = String(s.productId); (o[p] = o[p] || {})[String(s.locationId)] = num_(s.qty); });
+  return o;
+}
+function orderOut_(r) {
+  const o = {};
+  SHEETS.orders.cols.forEach(function (c) { if (c !== 'clientId' && c !== 'setsJson') o[c] = r[c] instanceof Date ? r[c].getTime() : (typeof r[c] === 'number' ? r[c] : String(r[c])); });
+  o.time = ms_(r.time);
+  try { o.setsMap = JSON.parse(r.setsJson || '{}'); } catch (e) { o.setsMap = {}; }
+  o.confirmed = r.confirmed === '' || r.confirmed === undefined ? true : isTrue_(r.confirmed);
+  o.confirmedAt = ms_(r.confirmedAt);
+  return o;
+}
+function itemOut_(r) {
+  return { time: ms_(r.time), orderId: String(r.orderId), productId: String(r.productId), productName: String(r.productName), kind: String(r.kind),
+           qty: num_(r.qty), listPrice: num_(r.listPrice), amount: num_(r.amount), sessionId: String(r.sessionId || ''),
+           staffName: String(r.staffName), locationId: String(r.locationId), status: String(r.status) };
+}
+
+function summary_(acc) {
+  const t = today_(), st = settings_(), sessions = sessionsOut_();
+  const items = read_('items').filter(function (i) { return i.status !== '作廢'; });
+  const bySess = {}, preBySess = {};
+  let tu = 0, tr = 0, tp = 0;
+  items.forEach(function (i) {
+    const sid = String(i.sessionId || ''), q = num_(i.qty);
+    if (i.kind === '現貨') bySess[sid] = (bySess[sid] || 0) + q; else preBySess[sid] = (preBySess[sid] || 0) + q;
+    if (i.time instanceof Date && dfmt_(i.time) === t) {
+      if (i.kind === '現貨') { tu += q; tr += num_(i.amount); } else tp += q;
+    }
+  });
+  let mo = 0, mr = 0, ao = 0, mu = 0;
+  read_('orders').forEach(function (o) {
+    if (o.status === '作廢' || !(o.time instanceof Date) || dfmt_(o.time) !== t) return;
+    ao++;
+    if (String(o.staffId) === String(acc.id)) { mo++; mr += num_(o.total); if (o.confirmed === false || String(o.confirmed).toUpperCase() === 'FALSE') mu++; }
+  });
+  const target = num_(st.totalTarget) || sessions.reduce(function (a, s) { return a + s.target; }, 0);
+  return {
+    date: t,
+    session: currentSession_(sessions, new Date(), st),
+    today: { units: tu, revenue: tr, pre: tp, orders: ao, myOrders: mo, myRevenue: mr, myUnconfirmed: mu },
+    event: {
+      name: st.eventName, target: target,
+      units: sessions.reduce(function (a, s) { return a + (bySess[s.id] || 0); }, 0),
+      pre: sessions.reduce(function (a, s) { return a + (preBySess[s.id] || 0); }, 0),
+      sessions: sessions.map(function (s) { return { id: s.id, date: s.date, name: s.name, target: s.target, units: bySess[s.id] || 0 }; }),
+    },
+  };
+}
+
+function applyStock_(changes) {
+  if (!changes.length) return;
+  const key = function (p, l) { return p + '|' + l; };
+  const map = {};
+  read_('stock').forEach(function (s) { map[key(s.productId, s.locationId)] = s; });
+  const pmap = indexBy_(read_('products'), 'id'), lmap = indexBy_(read_('locations'), 'id');
+  const now = new Date(), logs = [], touched = {}, fresh = [];
+  changes.forEach(function (c) {
+    const k = key(c.productId, c.locationId);
+    let row = map[k];
+    if (!row) { row = { productId: c.productId, locationId: c.locationId, qty: 0 }; map[k] = row; fresh.push(row); }
+    const before = num_(row.qty), after = c.set !== undefined ? Number(c.set) : before + Number(c.delta);
+    row.qty = after; row.updatedAt = now; touched[k] = row;
+    if (after !== before || c.set !== undefined) {
+      const p = pmap[c.productId];
+      logs.push({ time: now, productId: c.productId, productName: p ? p.name + (p.spec ? '／' + p.spec : '') : '',
+                  locationId: c.locationId, locationName: lmap[c.locationId] ? String(lmap[c.locationId].name) : '',
+                  delta: after - before, balance: after, reason: c.reason || '', ref: c.ref || '' });
+    }
+  });
+  Object.keys(touched).forEach(function (k) { if (touched[k]._row) update_('stock', touched[k]); });
+  append_('stock', fresh);
+  append_('stockLog', logs);
+}
+
+function listMaterials_() {
+  const out = read_('materials').map(function (f) { return { id: String(f.id), name: String(f.name), size: num_(f.size), updated: ms_(f.updated) }; });
+  out.sort(function (a, b) { return a.name.localeCompare(b.name, 'zh-Hant', { numeric: true }); });
+  return out;
+}
+
+/* ============================================================
+ * 執行環境（取代 Apps Script 的服務）
+ * ============================================================ */
+const LockService = { getScriptLock: function () { return { waitLock: function () {}, releaseLock: function () {} }; } };
+const Logger = { log: function () {} };
+const Utilities = {
+  formatDate: function (d, tz, f) {
+    const p = {}; new Intl.DateTimeFormat('en-GB', { timeZone: tz || TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+      .formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    return f.replace('yyyy', p.year).replace('yy', p.year.slice(2)).replace('MM', p.month).replace('dd', p.day).replace('HH', p.hour).replace('mm', p.minute).replace('ss', p.second);
+  },
+  getUuid: function () { return (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function () { return (Math.random() * 16 | 0).toString(16); }); },
+};
+/** 網頁呼叫的入口：執行一個 api 函式，這次的寫入一次送出 */
+function apiCall_(req) {
+  const fn = String((req && req.fn) || '');
+  if (!/^api[A-Za-z]+$/.test(fn) || typeof globalThis[fn] !== 'function') return Promise.resolve({ ok: false, error: '未知的功能：' + fn });
+  return Promise.resolve()
+    .then(function () { return globalThis[fn].apply(null, Array.isArray(req.args) ? req.args : []); })
+    .then(function (out) { return DB.flush().then(function (info) { return { ok: true, data: out === undefined ? null : out, queued: !!(info && info.queued) }; }); })
+    .catch(function (e) { DB.discard(); return { ok: false, error: String((e && e.message) || e).replace(/^(Exception|Error|FirebaseError):\s{0,9}/, '') }; });
+}
+
+</script>
+<script>
+/* 正式版資料層：Firebase（Firestore 即時同步＋離線、Auth、Storage）
+ * 所有資料表都會即時同步到這支手機／電腦，core.js 直接讀本機的資料，所以畫面幾乎不用等。
+ * 寫入時先更新本機，再送到 Firestore；沒有網路時 Firestore 會先存在裝置上，連線後自動上傳。 */
+window.createFirestoreDB = function (cfg) {
+  const V = '13.3.0', BASE = 'https:\/\/www.gstatic.com/firebasejs/' + V + '/';
+  const KEYS = Object.keys(SHEETS).filter(k => k !== 'payments');
+  const snap = {}, mem = {}, firstLoaded = {};
+  KEYS.forEach(k => { snap[k] = new Map(); mem[k] = new Map(); });
+  let admins = [], ecpayPub = { mode: 'stage', mid: '', hasKey: false, hasIv: false };
+  let F, A, S, app, db, auth, storageMod, user = null;
+  let ops = [], seq = 0, ctr = 0;
+  const changeCbs = [], errorCbs = [];
+  let changeT = null;
+
+  const cols = k => SHEETS[k].cols;
+  const isTs = v => v && typeof v.toDate === 'function' && typeof v.seconds === 'number';
+  const fromFs = (key, data) => { const o = {}; Object.keys(data).forEach(c => { o[c] = isTs(data[c]) ? data[c].toDate() : data[c]; }); return o; };
+  const clean = (key, o) => { const x = {}; cols(key).forEach(c => { const v = o[c]; x[c] = (v === undefined || v === null) ? '' : v; }); return x; };
+  const same = (a, b) => (a instanceof Date || b instanceof Date) ? (a instanceof Date && b instanceof Date && a.getTime() === b.getTime()) : a === b;
+  const newSeq = () => Date.now() * 1000 + (seq++ % 1000);
+  const idFor = (key, o) => {
+    if (key === 'settings' || key === 'images') return String(o.key);
+    if (key === 'stock') return String(o.productId) + '__' + String(o.locationId);
+    if (key === 'orders') return String(o.orderId);
+    if (cols(key)[0] === 'id' && o.id) return String(o.id);
+    return null; // 自動編號
+  };
+  const ref = (key, id) => F.doc(db, key, id);
+  const push = (type, r, data, opts) => ops.push({ type, r, data, opts });
+  const fireChange = () => { clearTimeout(changeT); changeT = setTimeout(() => changeCbs.forEach(f => { try { f(); } catch (e) {} }), 400); };
+
+  const api = {
+    /* ---------- 啟動 ---------- */
+    async start() {
+      const mods = await Promise.all(['firebase-app.js', 'firebase-firestore.js', 'firebase-auth.js'].map(f => import(BASE + f)));
+      const [appM] = mods; F = mods[1]; A = mods[2];
+      app = appM.initializeApp(cfg);
+      try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); }
+      catch (e) { db = F.getFirestore(app); }
+      auth = A.getAuth(app);
+      await new Promise(res => { const off = A.onAuthStateChanged(auth, u => { user = u; off(); res(); }); });
+      A.onAuthStateChanged(auth, u => { user = u; });
+      if (!user) { const r = await A.signInAnonymously(auth); user = r.user; }
+      await this.listen();
+      return api;
+    },
+    listen() {
+      return new Promise((resolve, reject) => {
+        let pending = KEYS.length + 2, done = false;
+        const one = () => { if (--pending === 0 && !done) { done = true; resolve(); } };
+        const fail = e => { if (!done) { done = true; reject(e); } else errorCbs.forEach(f => f(e)); };
+        KEYS.forEach(key => {
+          F.onSnapshot(F.collection(db, key), s => {
+            let remote = false;
+            s.docChanges().forEach(ch => {
+              const id = ch.doc.id;
+              if (ch.type === 'removed') { snap[key].delete(id); mem[key].delete(id); }
+              else { const v = fromFs(key, ch.doc.data()); snap[key].set(id, v); mem[key].set(id, Object.assign({}, v)); }
+              if (!ch.doc.metadata.hasPendingWrites) remote = true;
+            });
+            if (!firstLoaded[key]) { firstLoaded[key] = true; one(); } else if (remote) fireChange();
+          }, fail);
+        });
+        F.onSnapshot(ref('config', 'admins'), d => { admins = ((d.exists() && d.data().emails) || []).map(x => String(x).toLowerCase()); if (!firstLoaded._a) { firstLoaded._a = true; one(); } }, fail);
+        F.onSnapshot(ref('config', 'ecpay'), d => { if (d.exists()) ecpayPub = Object.assign({ mode: 'stage', mid: '', hasKey: false, hasIv: false }, d.data()); if (!firstLoaded._e) { firstLoaded._e = true; one(); } }, fail);
+      });
+    },
+
+    /* ---------- 讀 ---------- */
+    read(key) {
+      const first = cols(key)[0];
+      return [...mem[key].entries()].filter(([, v]) => v[first] !== '' && v[first] !== null && v[first] !== undefined)
+        .sort((a, b) => (a[1]._s || 0) - (b[1]._s || 0) || (a[0] < b[0] ? -1 : 1))
+        .map(([id, v]) => { const o = { _row: id }; cols(key).forEach(c => { o[c] = v[c] === undefined ? '' : v[c]; }); return o; });
+    },
+
+    /* ---------- 寫（先放進這次的批次，flush 時一起送出） ---------- */
+    append(key, objs) {
+      objs.forEach(o => {
+        let id = idFor(key, o);
+        if (!id) id = F.doc(F.collection(db, key)).id;
+        const cur = mem[key].get(id), data = clean(key, o);
+        data._s = cur && cur._s ? cur._s : newSeq();
+        if (key === 'stock') {
+          const add = Number(o.qty) || 0;
+          mem[key].set(id, Object.assign({}, data, { qty: (cur ? Number(cur.qty) || 0 : 0) + add }));
+          push('set', ref(key, id), Object.assign({}, data, { qty: F.increment(add) }), { merge: true });
+        } else {
+          mem[key].set(id, Object.assign({}, data));
+          push('set', ref(key, id), data, { merge: true });
+        }
+      });
+    },
+    update(key, o) {
+      const id = o._row, cur = mem[key].get(id);
+      if (!cur) throw new Error('這筆資料已不存在，請重新整理');
+      const data = clean(key, o), diff = {};
+      cols(key).forEach(c => { if (!same(data[c], cur[c] === undefined ? '' : cur[c])) diff[c] = data[c]; });
+      if (!Object.keys(diff).length) return;
+      if (key === 'stock' && 'qty' in diff) diff.qty = F.increment((Number(data.qty) || 0) - (Number(cur.qty) || 0));
+      mem[key].set(id, Object.assign({}, cur, data));
+      push('set', ref(key, id), diff, { merge: true });
+    },
+    setField(key, id, col, v) {
+      const cur = mem[key].get(id); if (!cur) return;
+      v = (v === undefined || v === null) ? '' : v;
+      cur[col] = v;
+      push('set', ref(key, id), { [col]: v }, { merge: true });
+    },
+    put(key, id, o) {
+      const cur = mem[key].get(id), data = clean(key, o);
+      data._s = cur && cur._s ? cur._s : newSeq();
+      if (cur && cols(key).every(c => same(data[c], cur[c] === undefined ? '' : cur[c]))) return;
+      mem[key].set(id, Object.assign({}, data));
+      push('set', ref(key, id), data, { merge: true });
+    },
+    remove(key, id) { mem[key].delete(id); push('delete', ref(key, id)); },
+
+    admins() { return admins.slice(); },
+    setAdmins(a) { admins = a.map(x => String(x).toLowerCase()); push('set', ref('config', 'admins'), { emails: admins }, { merge: true }); },
+    email() { return user && !user.isAnonymous ? String(user.email || '').toLowerCase() : ''; },
+    ecpayPublic() { return Object.assign({}, ecpayPub); },
+    saveEcpay(c) {
+      const priv = {}, pub = {};
+      if (c.mode) { priv.mode = c.mode; pub.mode = c.mode; }
+      if (c.mid !== undefined) { priv.mid = c.mid; pub.mid = c.mid; }
+      if (c.key) { priv.key = c.key; pub.hasKey = true; }
+      if (c.iv) { priv.iv = c.iv; pub.hasIv = true; }
+      if (Object.keys(priv).length) push('set', ref('private', 'ecpay'), priv, { merge: true });
+      if (Object.keys(pub).length) push('set', ref('config', 'ecpay'), pub, { merge: true });
+      ecpayPub = Object.assign({}, ecpayPub, pub);
+      return this.ecpayPublic();
+    },
+    links() {
+      const p = cfg.projectId;
+      return { console: 'https:\/\/console.firebase.google.com/project/' + p + '/firestore/databases/-default-/data', storage: 'https:\/\/console.firebase.google.com/project/' + p + '/storage' };
+    },
+
+    /* ---------- 送出 ---------- */
+    async flush() {
+      if (!ops.length) return { queued: false };
+      const list = ops; ops = [];
+      const chunks = [];
+      for (let i = 0; i < list.length; i += 450) chunks.push(list.slice(i, i + 450));
+      const commits = chunks.map(ch => {
+        const b = F.writeBatch(db);
+        ch.forEach(op => op.type === 'delete' ? b.delete(op.r) : b.set(op.r, op.data, op.opts || {}));
+        return b.commit();
+      });
+      const all = Promise.all(commits);
+      all.catch(e => errorCbs.forEach(f => f(e)));
+      // 有網路時等伺服器確認（最多 6 秒）；離線時資料已存在裝置上，連線後自動上傳
+      const t = new Promise(res => setTimeout(() => res('timeout'), navigator.onLine ? 6000 : 300));
+      const r = await Promise.race([all.then(() => 'ok'), t]);
+      return { queued: r === 'timeout' };
+    },
+    discard() { ops = []; KEYS.forEach(k => { mem[k] = new Map([...snap[k]].map(([id, v]) => [id, Object.assign({}, v)])); }); },
+
+    /* ---------- 檔案（簡介 PDF） ---------- */
+    async storage() {
+      if (!S) { storageMod = await import(BASE + 'firebase-storage.js'); S = storageMod.getStorage(app); }
+      return storageMod;
+    },
+    async putFile(path, b64, type) {
+      const m = await this.storage();
+      const r = await m.uploadString(m.ref(S, path), b64, 'base64', { contentType: type || 'application/pdf' });
+      return Number(r.metadata.size) || 0;
+    },
+    async fileBase64(path) {
+      const m = await this.storage();
+      const buf = new Uint8Array(await m.getBytes(m.ref(S, path)));
+      let bin = ''; for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
+      return btoa(bin);
+    },
+    async deleteFile(path) { const m = await this.storage(); await m.deleteObject(m.ref(S, path)); },
+
+    /* ---------- 登入 ---------- */
+    async signInGoogle() {
+      const p = new A.GoogleAuthProvider(); p.setCustomParameters({ prompt: 'select_account' });
+      const r = await A.signInWithPopup(auth, p);
+      user = r.user;
+      return this.email();
+    },
+    async signOut() { await A.signOut(auth); const r = await A.signInAnonymously(auth); user = r.user; },
+    onChange(f) { changeCbs.push(f); },
+    onError(f) { errorCbs.push(f); },
+  };
+  return api;
+};
+
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600&family=Noto+Sans+TC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -318,8 +1403,9 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 /* ============================================================
  * 共用
  * ============================================================ */
-const API = String((window.ISH_CONFIG && window.ISH_CONFIG.api) || '').trim();
-const REMOTE = !!API;
+const CFG = window.ISH_CONFIG || {};
+const PAY_URL = String(CFG.payUrl || '').trim();
+const REMOTE = !!(CFG.firebase && CFG.firebase.apiKey);
 const DEMO = !REMOTE;
 const SITE = location.origin + location.pathname;
 const LOGO = 'data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAA\/kAAABICAYAAACtOzVBAAA\/5UlEQVR42u29eXRd2XXe+X3n3PsGDCwORQBksarIKpZkl20pcSmO4pYEsMqR1bHjyMuGOu6MzmDHsZPuTtpZ6SQ2CU8dZzmJ3R3HidIrnXTL6aSwMrRbiR1bMgFZ7ciOaq12bFFWsYosTpg4E8Cb7j3n6z\/ufcADCIATOBS5f2uRGN\/De\/e9e+759v723pw9MiIYhmEYhmEYhmE8RASoQrATsdBW872Hpq9fE0ACplfu5niOw3MS4dQfGHn+qTr+agS+JYs46AiSuJaS\/6mD8PdHPrvwGQGOQLSjtjlHATcBxJmxkc8OJnx1MVcg4de\/hxOCecSNLMm++vnPXJ7p3u5BPlZnL5dhGIZhGIZhGMZjJPCPwnES4ezYvm\/eVeevV537SwRfIOEEEMAuT\/yhCvwvXxgb\/hECUUdNGz4uJHYIDMN41K5L2jC4X\/zPnp+Ta3+XduwMy4KtOR+k4rRg9\/ThxqcL7fQxDMN4nK4FDhPQ3EeGvi5x+r9BVm+EmAPw3fU+ClguMtEcrvofujA6vMCJ+X\/w+jj8JyYR7CiayDcMw4R4cU3RimBYK7558+93BUhXfJRePBKgQ+EZI4ofuOL7IAv7UfdzgnDs8UfZ62I84bBHvkcVJ6VUeARVnrhC+bWKUzaW31v50BNM2+rcXfN1969ywwCCxeAMwzDwYH3lnIBmnPvxPu+q17KYkUhvumYQXkC8msXoiB+b+djIv9o\/OXfRSiRM5BuG8QRkxMsNPcFCW7NHdBOAK8Q22SvOe37ObgKxJ10YBUSo\/IgVIdKJQoSyKLYJdSR0KLVFZoCWADYBNCAsA2p5YjEALQDLDliMES0hXvd2cTKeFBwYo3sKDnUAAwD6PVALwiCBmoh+An2A6gAHIKUiq4CqAFOWH6uOdGXArRtocz2BNGFtJODmoAFWggax5+fd26rnZuTa8\/MeHAgWQDAMw1i7npITiAsffnpfDr22mEeBm2s+Aq4TEXam\/qnrzfjNAD41NQqPaeR2NE3kG4bxiGTEu5m0mzLiPUJ8fUbcleodunnD3X1AuYAgIJeQF48wOCkLYgdQC0SzFONNCs1IdSjeANAsxDmWQTScsBiBlgOWItHwQiMHl0g1AS4TaoUQOnVWm1kl71R8p7Xn7EgLJ05kFlU2jHvf\/GH85fTy4lwtC2kt7fhKU+266KsCqwnUL7EOaCAQfU7qi8SgE6qR2AEVgQQCAyLqhAYBVgHUINVFVsvfqTmqEsEUgE8IJiQ9wYRrVfsalc5uwE+bBhC6kQJzIBiGYWzAOBwmEfIkeanq2NeO0q1KshwhAiL1fgCfsoNoIt8wnkghviK+N8mIc7NaWd2c2HbrRLcjN7Gmr72hQ28GfNWS2934tqMQgSxGdAi1BWSE2iDbEhoAGoUAxzKgpiMaEJYi0ASxCBXZckcuRqntgaUItXKimQjLuUJ7B7l4HUleT1vZ0lJ\/ZyE7n3\/gDWTb\/xJcWSNSjgE8dhTACRALaw\/3lL1fjSeUsfXfGILwMnRsAjiGcgMHCJMnOgA6AG5s59\/\/4itIh9IDycDAcqWZ1VJXzdOsiYGEvtom+oNUd2AtAAOOqEZpEEQ\/iD4IgxD6nEN\/FPoA1AH0lx\/7QPQTqkisgqpArJCoAEhrjkVQs7tm9gQuu+vk7TkQdNP3VqqAypuh2AhvuL5v5kBYE0ywHgiGYTwg6LSj6qh2QMS6DvBbVHwN2JEzkW8Yj9zYle3IiK9J4nDjjDh5szhf2Vhu0giLAAJUZsOLDWVePOhcUSEUGfC2qCalNsAWiCakDskbEpqClgEsgmgmwGIuNEE0ACwhoglgSeIyU7UY1UzSpN1pq+UUW81au\/PC1Rca+NY3AifuxxiPq2uzhUfByRPgeFd8L4DrRcgUgLGh1ddtEsD4y8XXXWGyLqumMpuviQl7zxvG7dJzurB37TvWDZgB6D1fb+ecXTlfJ4rzsgjwnc9QBA+3vUs0Pv2KP7XrVF\/fcqUaEletVFkLWV5dovpqcFXl6g\/AQFG2oAFE9DuHehQGwdKBIPSL6KM0CLJSuA5UKx0IfSQqkOogPYAkJehIJAQ9AQ+uWdPXr\/UbORBWgwYbOBBWrlLFx21yIFgAwTAMKHCxXZRg8Q56tzbtyJnIN4x7FuJbZcQ3q9fE5hlxroruzYV47w27X0et3aB1m1QFdWvEi4w4qA6EjMXHhgohvuxKsR2lBqG2yBtQKb5XbOq8EaU2HBqMaoBoZlENsNLs82h2Onmn5avZwb2hjYXzGe9LLdQbwBt3lxHfYGO\/4Uuzki2cuHdrvel4w9j+ZXjdbm\/bAmbaWFwSR9cGEKbWrTVjt+NAmEAE3ogArm\/3AfniK6+kr7wwn1xb8NVm3k4rlbQSAuptdeo50Z+AtbZjHyL6UqKaUTsg9DmgPwIDKIIGOwhWQfRFoR9EjeVHQH0SK6RSipVIVBxQ9EDo9jJZFyh2XNsocTMHwpoGirdwIODWfVfW90DgBuu7BRAM41FnskjkpEl2shOSZumg2tKyv5ITI357w3XZMJFvPJb29LvOiPdsGHizEAdIcm0mfHWjs+lYNAJBazPiQUAUAqQQyYakNqEWgBbANommoBaEZYFLZGwKXILQINVU5CKIBoglCMuJQ0OBi9HHDoOavpK2MsQ2W2g2a+3OC7v2NSdxItzvESP3IyO+RohbRtwwDGxbZ39tuIxN3Hugb30A4di2OhDeyFCUGW17Buv1cfhxvOxPXZ2t11vVSrXGeg5XjTGrtwOLHgbAAIl+RfQRcUBinU6DUeijWCc1CLAOqL8oW2AtCn2EKgDqAqskqpL6AHrHogeCJ+G7DoQN+mT3frkmwL3RBIb1AQQVx063747b0oFg\/Q8MY3vXYh2F48TlmZmxkV\/Zkbpvu5rHDLi5u3656Y+Jg7uWxeVONfwSAGDaRuiZyDce5Yx5cSHuieDfTka8W9vY7ZremxHvzTisz4hjzeZAvRsC5AKyKAjqKCIPRMeJnQjlLDqmt1TUhDcJNQkuBajtiEWJy6QaUiHEPbAcYiHOISznUAsejQq0nOVpx+ehXa+0Oo3Bvs7+xdnO\/cmIX92yRnwKG9fLbrLRxDFsIcQtI24Yhm1abyrHul8OhGPFmo6NHAhj61xOK+s6sOJA6K7ZBFQEgk8EFD0Qtvc6P4pkrjJcrXeqaavdqsTEV9Mkq3TIfgT05QlrIcOAA2veqS8IAwDqpAYl9pHqhzAIsAaoX2AdRJ1CH6CawAFSKcAUUKWYxIC04sik28R1nQNh\/V6g14HQO8ZxTT+Zu3QgSDeZ8gzDWLe2zVF\/oxH0Wt2xvxmVQfArXh1BIKIjuCt1\/mIn\/6GD\/\/HSrMbhOWki30S+8XCF\/LpmQBJIwqdlJ+PUbZIVLz\/JCys6glaz4xGIiMoAtgC1AHUANEG2iwZuXKLUBLgExkaRDeeipPZKwzaHZYWiY7p37kaIsZMztqpejTwkHSZqJtc7rcX6YOfg0Jns\/iwm13vHhbpu1gcnimd\/pxnxjezp25kRNyFuGIbxiAQQtmdRpjYpX7gbBwJ63FkTQCwC2PP3ZcSVxuHfWXg+fSq5Ub0a05oLrPcnrqKY1TvB1YJzlRDjDol1+qL\/QbeBosAaoYHia\/YBGhBZJzQgsAqpWjRUZAVAjUVPhNQBrteB4Agk5JoMxXr3QSf2THwR4kpQwAIAxpO+rk0g6ijcvon5L50ZHfr4YOI\/tSd1w60oZGVkzTuy6ujaUbjUCT+y\/\/jC3zeBbyLfeEgZ+W6HdpZ2vLSIqK9cCHMIzSAE4Voe43w74rSEBQANgYuimgm4GIBlUk0XWHRMd2gkwnLO2EodF\/NOkiVp3qmGertVaWUjnfk2p+5HRnzjrulTU3DYonP0nWbEJ4BotnTDMAzjIfY\/uOfyhXtxIGw1gWRsDHFND4RJBOBMANDCNvdB6DoQOs1KpVppVdIkqWQhTxk1mEdXa1H9SUSf86xFxZWgQQQGKJZjG9FHYljAIYrDicNTfQm9Lw9JKfyRlR8hhN5kiAUAjCdJ6HNi4TNvju7+QEDl+yCMZREHHeECdDkG\/UYn6pP7puZ\/Q4AzgW8i37gPQp6FbWZFyINFVDshmZY1dWRx8WoFIROWQowzIs95xJNReIfOvRkDzrGjsyMH5i9v98mqrkv\/6OYZ8al1jdo2aNa2UUYc6zLi0TLihmEYhvEAHAjTa66f2+ZAWN+olYB6HAjL2xEwmPdDe3Lnnl0KeDYovDcBDgbwPQ44EIX9qUN\/PaH3ZaYkqMhkrncAsNx7yQIAxmMp9K+cB\/A3AeDsBw\/Un306EK\/MtrrTlorfuR+TlwwT+U+AkGfZw4brhLwnmHI1I08Uo9ZaAcikpVy62AHeidJpD30lEu8kcG+nPpl9ete5+a2EvI7Crc+K30tGvCvETUkbhmEYhjkQtmEKA3EXDoSxMUROIAcW5gHMA\/gi1kxNQDr01IEhhHxfHuOLzuH5IH61Aw4CeF7A3go5UEuwEgDodQCEdQGAshySsgCA8S4U+kcBNzYKNzaNwC+cL5qMfroozZksfscy+CbyjbvJyPt1GXlXdohvFbPZmpkw24ZmCL4F4G1HfCWGeC5Jw9mrya7L7\/mlt9pb\/F03NQo3BgDdyHk5PqOMykXLiBuGYRiG8Sg6EO5q0zG9GjCYHIcbB9BtfDs2jcg3kAHnLwC4sD4A8ObHDld3d648nYfk2Yb4XC5+VUIcyqGXHLhf0EjVuXrNwTtyZYpP1wEQhSit9kPq9gCwAIDxqDIBxInpMmvf8x59t9jzu9Omum6i7vd7+mZpkwkv76pGib1jZ7GBE8pE\/gOY804hlu1zVY6F8R5gUtbIp6W1Pq4K+UZHupQBZwScpfgmwLeh8HZM\/cxi0j+\/uZC\/vEbIT91cPxcxbRYbwzAMwzCewIDBBkJlfZ+f7v5pahqx3G91AwBfWHO7jx2uzuTLw8rC\/uvOvZRIhwLwXlLPCXgewNNV5+pVB7jSAdCt\/c+KZsZi0c+46KFU7M5dd4KRvWrGNrhf7st9P0IimToKYgoOQ0WPkNudNvX6OPz4Ajg5BI1PIj7qwn\/FYVE4k+JWrikBDqNwWP3drQ\/i7JER2emzqbUeZCnmy1FzjnCJIyoEPFcX+FYUWiF2nMNsFOc8eDIHziTQV\/LI00hxNiz5i891LTKbnWjjcFgAb8rIv8ujU4ZhGIZhGI+KaDoG8GvGy\/KAct+FW4iCsx88UB8YCHtbQQc9cDAA7\/XA80F4idQ+gCM1x7TqVhM9hfhfdQCsm4jkekcY2ytT7MErBDsRC20133to+vq10iFh++An4LycGoU\/ssHo6+uv7d9zI+vsrqaVAeXqzwklAnOPRsyzxaeYXt0xPXtp\/e2OjyIZm0YkticZehRwE0CcGRv57GDCVxdzBRJ+\/Xs4IZhH3MiS7Kuf\/8zlme7t1kz9Ggd7nRT62OHqXHNxn0\/8rixXPwBUUrWaWbj2bMXN8lfml3vLsXsc27BM\/gYZ+ZtG0AHOAS5xhbU+IVwh5IWOgFaInSzgUkachXAOiF8BcdqDbzHg3HArneNtCvkpABeLSJNWbBjW1dIwDMMwDAP32QEgTG5umZ0cB\/d2+wJ0AwDF\/u5s+e9za273rfv6FpbzfVnwBxohHk6IQ1F8D4nnBDxPYHdfwkqFAMsSgExA3g0AoBAivYklCwAYeuWV9OquU31XAey6D\/ffvd+YUHt+6criwwimdLURJxEwjVwAr7267\/dm0qiEDwbi5WYMw94lu6nofcIVAeskZC4Jy4jXZseG5z1xgnBvUPH4nr3zX+RkETDQODwekcx+d0zhxCRw5Zv2PZdFfBuhb5pvL70PDvuoWKslxSmvSCTO5xdzzFx8deR3HfRZOf4\/nJj78q2e1+Mu8rt18etnyTtXdK5H6gt7fTcj34lCIyhkUQsZNEPx7Ui9k0BfCcA7LsazBOaGpy4u3a6QHxuCjk1Cx0zIG4ZhGIZhvGsDAMcAHhsHp9YHAD492wDwdvlvuvd2F79xz2BM3fCS+HwFPJiT73HEoSi8RGBYwHCfo6s4OpY9m0K5Jw0CohDXO0tRmAVWGxcajxXHR5EcmUZ+YeDCx3ei+o\/rQaGFtRnj7aAOKAeY57hy7qMHvgG\/fP7Kg3ROrHT1n0S4+E179iMmf+IS+F2A3j+YOEQIWSz6YQBAJqhUdys4wntyT0ruSR1eduB3LgeHS5eGT1w84v5tM+b\/jJMX3+oV2A+zrwAnEM4c2ftiH\/xfz6M+MejdjgigUz7P9c\/RAYl3fK5CPJfQfXQxjz92+bWRT7dz\/AQn577Yve\/1r1nyOAt5Eq5CIvFgyrW1U82gPJOu5rnOCThD8s0onHaIbyU+OecWW3NP\/+aVG7dlrV9d5LfMyFsjO8MwDMMwjHd3AGBiCwcAxsF1e8PIX7+8CGARwFvrb3fpY7t3tNq1fa08f7YBd9g5HJLwVaCeBfAsxF39CX3K1QBAkf0v9rMqJgBEWAAAj6nzuJY67nKhKBO+D\/ePlEAIci5EPvCM9gTC74zuHdjrkh9E1A8MeLe7FYVmFK7mMb8dV0sEFIueGEKAQAmArzv3cs3xZYbkv7v06r5PXgr4nzk5e+lhCP2vKR63OIE4PzbyFxOHH+\/zbueNPOJa93luMr4zAupEqa3iuRFI+537diTxD8+\/NvJ3\/mE+d5SFA8L1liUk7yp7fY+QR9H8jiB82pOR9+Vx6UhoBCGXFjoB84ROReGUB78SwHcqdO94X5vb\/ZlT17ds\/LAuIw+z1huGYRiGYRh3WAKAdQ4ATiI8\/UtXbgC4AeArAD7Te7vTo8\/vHEBnZDnTQed1UMJXQTgk4gUHDQPc258UDgCoGL\/cbQCYC5AQ1oxtXg0AmPh\/l+DImAmKQIja\/kx+qfMJInsYlvULr+77cI3xH\/V7vnwjXxH2jkWzyuR23qkr72eu\/e1mVGxGRUcM7EzcXwHid54bG\/6LnJz\/9w9c6I8DUwvw827kH+1I3Z9dzIWrWcxRxG62fJ7l8yNXf0fXshgd4fek7m98v0Y+8PHR5n\/Don\/FitBPHnUh332hUxad61O3KuQzCctByqOuRuF8UzrvyJORestFd1IO5+qdyuzOz5+9eqs32pqoazGuQESxANsSYxiGYRiGYdyXAMBRECcKB8AUiqQSJxEOTZ+5BuAagN9df7uzHz2wO8nzkXbU80t5eE9CdyiX3uPIA4IOENw5mND7ctpTkFYaAObFowla3WtbAODRfv8QAsntf23Uc\/94gKUInER+\/sjwd9eoT3q45HIWc96G4L3D4+YAuCjoShZDzfG5Qc9Pz4yN\/I+cnPu73ZKI+\/lc+7rn+CTi\/JHh13el7jsv9Yr7u3xqjvACdCmL2e7UfVSq\/4f50cpHMX2x0bXuJw9rljy0RsiThE8Ipo5MXPkKs4hGNqMQpMu5tNCJPBWgdxzjSQW+XXE4vVxJZ5\/75fNXcBsjFVYy8ibkDcMwDMMwjIcdANhkNFhvAGDFAVCOzyr3vVcAnADwi723uf7RA7tarc4zy8AhRxzKIt\/rgecj8YIDhjy5u+bpU1eEH3IUJQBZ2QtAQujdo29mIzaMu8zg5+dHh797V+L\/6WIe1ZaC460Fb1dDsqxYZ\/ccuUVwqvxZ0gqKJLArdT91YWw4eWZq\/ifvd0bfuaonoPNj+\/7eUMrvvJTFjEC6bcEfIL1SCP0\/cCXT\/0ng27vN+JL7LeTX2ISKZndM2O1cX7weAcJyEHJhMSqeawZccMTJKJ5yiG+R6Tt9MV7YaDTCeiG\/phNqj5D\/hAl5wzAMwzAM490cAJje3AFwsXQAYDUA8Nvr7\/PGh0b2Nr17pgEdjCEedtILAg6DeFbggYQY6Evou67ZvDsFoHAACEUPgG7\/KwsAGLfN66Wgnntt6A9UwE8u5zHEMtF7C5d3JIDEwScsyrO7hLI3RR5XmlP6zd6LJJwA3Qgx35n6v31+dPgMJ+f\/5f0T+kriUvvawtjIaD3B\/3ClcCuk92GdSK9mMduT+o9fGB3+AU7O\/wONwyfb1PmuaPpR1sj3CvmuTSiPQquwCd3Ioy52nN6OEWc8+WYATiXkO0zi+eFvnL+01cw\/HYXDFNwUbsrIw4S8YRiGYRiG8QQ7ACgAmzkAdnx+7iKAiwD+v\/UZ1vnLQ09T\/sByrueB+GIUXwJxSMILJJ6ukDuqHj5xRQYvlAGA0gGwEgDoqak2tit5Whxy3UPG96G\/Zb80Cb35scNVtRb\/N58waUlhq\/eJiqkSbkdKHwQsBy3l0hykBQG5IxyEvSSH+xLurJBuKUTkEWGzwAEBhgjXRIwVz587N7r785i8cmH9HPttOD9BMEt39SeNRudvo2gOuFJX3w1egBAFqjwOFKJY+t0Jd7uvnYBkMY\/RO\/7Y4h8cfh2T8xeT7ajl6E\/oKqQLEJpFs7tGFGba0AUIb0biVEK+5cTTic9mn951eX7TiMmvFEJ+agpuDFifkUcZAIh2yhuGYRiGYRjG2q05AWziAFgTAFjpAVAEAAKwMA9gHsAba+5wFMmlZM9QJ0v3Z8ChGOLhRDwcoJcI7ge1LyX7+hJ6B6JdNr+mvRb3TJRcStIByd121w96+MPhNQ7HSYTvbS396Z2pf\/lqHnNuYdGXEPoT+nZQWAr61xD+VfT84v5dsxd6NaSOwl381aeH20rf10T4uCc\/8VTK3dczxc0CCCRcR8h3pW5niOkPE\/gejcNtNDXj7kU+IajdWs6+L3X44GKQWNbRQ4iJg+86ZjIJnVLZVjx8SiIv+s4havOAxfrgRUcIe1L31JVO+IFB4IeTe40sVR24HDTVAn45Mp4GcKrj8\/PtZNfl9\/zSW+0tbuswWhz87gLTXZBMyBuGYRiGYRjGgwkAqJsxPAquJNqKn0VOIwcuzwCYAfDF3pu++bHD1VrnytOI6YFrii94uMMR+mjV8UPtCD3sLLIe8t+\/13nzBFpZ1FVBeR7vvLt+Iay4wwHJQxX6k4jHR5EI+P62JAhus1dGQhhMnW+F+Bt5xA\/sn5774mavaaEZL80CmAXwHy9\/eP9PLEE\/MZjwjy8FRWBTp4C\/kUc54o+d\/\/D+H+XkzLn1I+jupVY+k0BiyFE\/nhcPmBKiI9yO1PkbWVy+EfWrnvHXcunNRP4yANxQ2O3FrwLdEUKvPpW6yrVcRaL71u9ltxykSP6J2T84\/JPJPZ45se7oWzl+Znh69t+t\/eHlQsh354UOQZMAvjQJHSsWmYjpngM5bSuvYRiGYRiGYTw0MVoEAOJ6UXUM4NeMg+MAuvt6TEIsEnoXyn+\/AQCzR4a\/Unf8UDsogvdl7NsDE9kPi27X92fqA78wu7Q0Je\/u+HkwiLHqog\/hF+uJ+32NXOFhvB46CscJxAt+3\/sq0Nc1iqy229i5gDiY0Dey+KvtVvKtz33hfPP4KJKxIejYqobUTYK\/HHnO6ZlzAP7E3NjIWwMJjy1t8pwJMAj5zsT3XUP8VgA\/NzUKt0abbgO5ikCXhFD39LnUXg7x70XiH+8\/Pndmk5v9AoC\/M\/PqyMuNEP9av3d\/ql2MxZTDlg0GXStKVceDnYCPbItdn06DGkUyBSQXh5CtEfIbWB8mbC01DMMwDMMwjHf9CMBuAGDvAtIxIJ8jBh8VZa1XkJ7ce\/iB9gd4abCiqYVlN7j0dPjAG2\/c0\/z5Mohy8V7uY2ZsJHuYdoapKTgA0Qd8pL\/icC2PARuMjxOgigNbUZfk4n\/73BfONzWKhD1j7iY2C+KUFv6uU5xTcxOzR4a\/bjD133Ejixtb3gUKEqFXAfzc2ND2B4QIsBu4yCK+nBF\/av9n5\/4z0NMwvkyEF7EKYGoBLEpo5k4A+NPzR0Z+NSU+6Yg00y0y+kKsEj7L9do2Nd5j5DTy46Orze9MyBuGYRiGYRjGkxEAOD4Kchr57JFHp+R2bnD4X+7Nlt\/fCgp6QM0A51oIr6RMG4MXpgH8mW4m+yGUHBCAZh9yycJY+TFSX8ctHgqBMJC45GonfGr\/1ML8eoF\/m084aggUwIUYf6wV3Ldj89edmUCA7zmKomfA6mQ+bFNPBcSBhK4d9dvzIXz0a6cvzmkUybFpxC0bxhclNO6NV+CHj8\/9H+fGRpb7PSejFAO2bMjHACA6fCCx5ckwDMMwDMMwjMcvCsEX+jxfDGXB9YMgCOjzxFKuwo594t5E9t2WHJSz5DXzsF+D0gJPan8udceqb\/SAmUdBzn1OKJpC3g1uEqGIPF38nZk4\/JW650utgLhe7JOIueAgPfU9r+yrTbwx2yiPGbZrKkLFAVnU1asK394V+LcbuCAQ8QaivgcpPzn3ry+MjfzUrpQ\/eDXT5s34CIYIUHzWRL5hGIZhGIZhGHgMx8+1m0Exk4L0wOrRQzPAk2rbK7Da\/0\/grriFiFaZhUaGZQLS0N0HNwQ4TiOfO8Kwq+KTRiY4d\/PvVQhciu75kPoagMY2P+vYnzh\/JQs\/9J6pi2\/fjTMBAPBJ5ALcpU72o9eZ\/vGqw76ONm9qmRfej90m8g3DMAzDMAzDeBzlJVnMUxcfkF1fq3\/Lpgiuey1u9RsJASRhz1EUjfTuNbAQhZ+6noUDzaDIXGvuLwCoAohw7VD1DWxjo0YJsebpr2Xh7Wf27vknOjrvMLGFPR9bOzmOj8Ifmb68ODM28qn+xP1gZ5O+Br3H2kS+YRiGYRiGYRiGgfvTugEiscjVMoKN5teLIKLcxyeA\/2t8CMm9ljjsn5r75w\/pGce6o2sFvs7JE53jo0iO4C6y+CVjQ5AAzkn\/oRX1gwL8rSIgJvINwzAMwzAMwzCM7WccxCQAYcGTILVZtjxZzGPsd\/yOc0dG\/tCzk3P\/QaNIMIZ4t40LNQ5\/K0fAFFZHFm4jriPBM0wJ5cjJe2ESkYAWauErjTaXU4f+fAvLvol8wzAMwzAMwzDwmOaQo4QIIOLBzfWLKqzp0V4AoCuyRXzZAdqquV0s6vLZ5\/CvLo7t+wucmv35stM8p0bhx6YReQfHlZN3Z5HHPTbcc4BrBoUQk7MEpJe3590Xor\/hoMuerj\/XlofSRL5hGIZhGIZhGHgc68D7BxI6Ae4Bdtf3AwmxFNBnLwAw2c1iC59rRRGC20yaEmBHUgoM1BJ86tJrI9+JPP4kpxe+gJ5s+\/FRJGNDECahlTGOjxCOQB7RiPX2EgAc26bZ8iO\/Mt+cGRte9tii7sFEvmEYhmEYhmEYjzFv3MjVbkfl0oNpvAcg3gBSQr8FAHj50RKgD5rxSUQBfEfV31Bon6p7HmpFRWLj18MBzAUt5dKOlB9vePfx+VdHpkBMuug+u\/f4zFfW2+uPjxaadmwMERMrwv9ho5hzu90cIm7vPk3kG4ZhGIZhGIbx2LF\/au67H\/ZjuNt6cjw+Xfd0fBTJkekzrQtjQ\/9Lv09+uhkVNhP53Yw+CN4oZ8L3e44l5NiNGLPZsZEvi\/qCk\/ucS9xvDn\/mwskV0T\/dU4sPrNSyP4nHfVtEPiUK4JStJYZhGIZhGIaBJ3QgOucerdFxfBgKr6w9J\/BkZ\/G7jE0j6CgcTjz9c3MXL\/\/JHYn7+sWgnLfQomQh1pdyBUBwRFpP+L4K3fsi9D3LeWjPvzryZQlfBPC5PPI\/75+efbO3Fv\/4KJKxe2je90SL\/Ohch4COA9BROEyVkZkhCC9DpW0C9kY3DMMwDMMwjHcthWg+CuIEuNK5fAxxaqrI2s5QnUcp7sCHGvMwutl8AeTkic751\/Z\/VzvGX6877mkEBVcK+dsR+xFQI5eaVJRAR1Srjr+nQv4eQX\/uRq4wf2TkywvEcUf3C4t5+vlD02damAZeH4cffxl6UsT+PYv8CCBRPHD+tf17\/slnZ64emS47WG4yxmCqXAy6zRLKk89OAsMwDMMwDMN4RDLyAIhxsHfvzkkEAsDEur37NHD0KHA92b+nEcMBaytvbFS2oHF4Ts68efojQ394MHH\/fjDhrjKj73kbDpCujR+AIzcU\/b7q+LU1x69tRf2lAd8+eenVkX9N6VN7Jue\/tGLlfwJs\/Pck8kn4pWJI30\/5GP6nv3BkZOZ7gXOU3gTwdmQ8SfrzTde+8OJnrl7fbIyBikXEYaGw\/I+tdQBYAMAwDMMwDMMwtlvIlxn5qQVwDEUn9E8UQr7oWD558+2ufNOup9qhcsDBPRMR3wvgBYEv8XN4dlnhGZC7l3KtZF8No3ekXSH0F\/7TmSPDH4bwL55O3fuuZhERyHGbYn8r0d8MUjMqAnA1x5fqnn99KY9\/5eJrI\/8my\/F3OTn3RaBwnz\/OWf1kmywYTMinU8enE+J9nu5bJCCTw3Ku2B+rl2bHRmZBnI7Q2x76CuHPMGSnl5ld5PT1a9hijqHG4dcEAMwBYBiGYRiGYRh3lJEfA4DVjLxuysiXnPnQc7s88r1MdIgMz1Puq0EcknCoHbRP4J6ah0vpQQJBQi4gi0Buu3PjtoT+\/Je+\/I17PhRrlR9OiO\/vT1x9MY\/IY+EWEeF4h\/0dekU\/ALSiYtnJv7LDuz\/a9HH84pGR\/\/XMDf5NTsw2Hmehv23d9TNBWa4i6keJACQ4R7iEGEoch1Li\/a4s129HoakkVJFcmhmrXSBxmuJJkKcU4ls+9ReUZzPD0xeX7sgBYAEAwzAMwzAM4wkX8j2W5A0z8vOjewcylz5TZdgf5F6KUS+AeC+p56TOAQJ76p6+6pKyRFfIBOSlkF\/OFUlFFQ+ieAwE71SYGU+o0D8Kx4nLiwB+cOYjI\/+UiN9H4Lt2pu7pXEIjqMjuC8RdCP5S9LtS8OtaFiMJtyd1\/\/3zO+I3vv1f7RvnxOxZFWPto4n8W0dOeu38iIA6AjplAICUSvXtHOFTcjh1HE6Ir\/ckgoTMOzRDzOT8pZmxkXOOOB2F05F6U8CZJMdp5+JFTl9cwm0GAC4OQV+ahI5ZAMAwDMMwDMN4lwn5YwCP3YWQV8IhRR4E8LzE9wB4gdSLAXzGIT6dOpf0EfB0yCUEEVksMvONoNgoMqFQj5Av9\/kOhUAyWW\/cXY1+qdc4OfdlAH\/59OjenwD0HUH8LhLfsMu7NIfQCkKmou8bBd5Flp\/dBn+Xs5jtSPgNJI5f+KZ9R\/iZx1PoJw+gmyLLT9jzPQDdAIDQybHiAOhGAh2RVhz3JcS+lPyG7gyKVhRaibIANz9zZOQ8gHconQzEaUZ30iGeb6E2x+kzrY0CABMAjgLu2HjREdQCAIZhGIZhGMajkpGfHAf39gj5Y5NQKUA0sYGQPz36fM0lzf11+Wc6ii954ZDIlwAcDNIBRg5VHdOa48pMt0wqrfVCI1dcvw9fL+S7yTvD2O6u+5jsjtcDOXlxDsDPAvjZi6P7vmoZ+mYpfrOAD\/Q5t7fq6DIJrSjkEQGEIDiyfN\/e3t9Mr+fKdyZ8Ic\/1b2f\/4PBHJnfOtzQJPk46MHnIL+xNAYDuZxFQOwodIYLqPeDOA2ni3IGUOOCJD3o6BAntCLQjmlW1Ls2MjZwDdZrA25R7k8xPd2LlrNq8\/NwXzjc3WiQnygV2ahR+DEA3ADA+WUR2LABgGIZhGIZh3KOQx+Q4XFfIT6GYI75VRv7sBw\/U+6ra00Y86KGDot4D8gUBLwCtA4zcmzrU+r1D1xkbBGRlVr4dFdtFM7LicQhunZBfm4kzjAec1UevDptG4PTs7wL4XQA\/c\/21\/Xua0tdnuUYj9JEI\/J7BhIMJibaEZhBUWPvdmvfzJjgguZ4rezp1X38xCz\/yiUn81bLrfjCR\/+ACADd15gyAYpQ6QqH+y8gjCTqynjg+mxLPJnTfyHKeXzN4eJe3UOfc7JHh8xBOi3zTIb4t8u2Q+dlnGjNzfAMZppFvuDCXUSYsgOiZAGABAMMwDMMwDGONtf4osH7fuNLkawMx8Tsvo7LvwP7hRifsd9SLlDss6CUSh4D8mQ40UnWu1uccuhn5XEImIpfQjIrNsJqRL230VJGEX8nIW1beeKQz+6UO01E4TMFhDJETM5cB\/Er5D5de3f3MYqj8fkhH6PBhAe\/blbqkFYRGKMpLbkPsJ1ezGBPw++deG\/pZTi6cepxs+8m79A3QtRJhfQ1AEBRUBABQ1v+XC6H3ZC0lD6bkQUd8yJPIItER0Eni0tzgyMLcEZ2D+LbIt0SdJHTWhXh2aGjvFU6c6GyxoDuMlm8mCwAYhmEYhmE89hn57gg6lLPkMY24Yq2fuPl2b37scHXn8rXdwfvn4PgcI18S43tQWOyfa3fi3j7v+isOSNdk5Itmd50oZVGh54FwjZDnzRl50\/PGuzi7HzG92mttagEcm0bgr165AODflP947sje913P8G2E\/uhTqXs5i0AzKGw1xpEAAxB2pa56PcMfA\/CjGIXDtIn8Rz4A0LuwsScA0BJEQoK6i6NLiIHEcSAhX0jJ0cIvBSwHIHd+afbSlbmZIyNnIJ0icdKJp3LH02mWzf7sr12aZ\/Em3PBN8fo4fG9tVTcAYOLfMAzDMAzj3TFLvreX08rkpw1G0Gkc\/tLVPcOKlZEAvYioQyBfEnAYraVnc5+MpA79fZ5wngA8snIEXS6hHaV2KMpVVxrelTXH5T43Wa\/gTcgbT0Lt\/voG61ML4JFp5M8ev\/hbAH7rd15++Sfd0KVxOve3nkrdV10vO+pvcYIzi1KUPgbgRzFtdv3HJwBQfp4LyiVBa0YAkoRPiIGEPJw6HPZwrzkCWRRaEch9cv0vjA3PfS9whsApiW8L8S14fxYBZ\/\/fodmrn9iivqNrRZlCOQJwNQBQvocNwzAMwzCM+7U9FLCSkV\/pXD+GyImyc\/0mQn5xdmT3UsrnRDybSIfzqMOOeGH2Eg8BGEqJHQOOSBOHqGKWfKauxR66nimuTJ1aL+R7MpBmrTfwOLlfttZqt6V\/1ol+6ig4NQX3tdMnOjiBn\/\/yN+75hadr6U8PJu7PLOZx84w+4dpRJPDe86\/t38PPzlwuXTEykf+YBgB6F9VuAKAVVkcAdsc3JA5PpXRPJcR7E0dIQACxnAtyuvbhi8Mzs0dwFsApUichnFLkqQg398z07KUVK8pGJ8M4\/JQ5AAzDMAzDMLY9Iz9WZuQJ3JyRny4+zHxoZK+rxH2IOBTpXiB0GMCLcxfxnFI846Ed\/Z5wcCCBvBw9l0nIJGX5Fhn5UnjYCDrjicnG36fTm8X5GwFQo\/CcvrwI4M\/OHdn31I6U33Ej29i6T4C5AJK7QwwjAC7jKLhRYM9E\/hPkAGA3ABCl7uiRtQ4A7kwcd6YOLzsQLB0ADQhO8fLM2MgciHcgnCL4lpPejE7narF2Ydf0mWvcwgHw+jj8eM9FygIAhmEYhmGYkL\/DjDzAsx96bmfFt58B8XyUe4nUi4ReIPi8oBHC7aknRFomcyKK8XNZWS9fCAjLyBvGZrz5scPVl\/JYO4Wr2LXBz68C2IVd2JW4Fn\/prfY9Cf5p5MdHkYxNI8y78Nea0X2Lc6hGQdwgnCZAVUeGnMVDO\/F4hNxM5G9HAIBr3wzdRTwTlEWp2eMA6I52SBz3pOSexOFrfNEgALmApRyxxdbV2bGR8wLOkXpL4JsST0E4k4d0\/vnPn926BGBjBwCOATi2LghgQQHDMAzDMN4N9t5jRdd6oKdr\/dTajLw2y8hf+5bndi0vZcOEDkbqRV\/UyL84JzxXQfsZkbsHPelJsGx4l8fVhndLuSJYdO1Wzyx5okjsWEbeMDY4h0eRcBr5YGfxz7e8+5FaXslbG+jPPiCv+mYy29GPA\/i7x0eRHNlk2tntcGQauQCOfHbh1IWxkf8ykPAblnPF9ZptjSZyco\/TsTeR\/wADAL2LfzcAgLDqAIBAR3hP7kkd9yTE+33ZK6ItoRGkCjsLM2Mjc6ROSzzpyLfyyFNVh3Not2f2\/vrlxa0cABObX0C5ctEEsNIltmSq\/Dg2tHrxnAQwbgEEwzAMwzAhvoEQnzwBjvfuJcq9xdj6O+nuLco9Rbcmd4N9hCY22syUXPrY7h3tZnU\/hGe90wuiXgJwWOKhxnJnhA57+zxZdQ4QELAq5IOAxXxdRn6tkF8ZQWcZecO4Y\/orzu1yEJINzp8goOIcXAz9QhG8u2eOgpoAFoAZzyev15mJ\/EfIAYBi5oqigCxfLQEo35bOFQ6A4cRhOCHf70lECbmE5aAclfTK7JHhcxF4x5MnQ4hve+K0l78QXZ55VluVSt7J83bnerajfXDoTNYTENBmF83bZWLziz8xXljnen82ti6I0BtAwMvl5xZAMAzDMIz7lxEH1thTV5yAPQH+NdfuIQiTEFCUCN6pEL+jxz0Oj4Xn06vpjWqblWoa0jSoXQvBVyLjMwn8QTgdlvQSgIOdNg84p919nklCwtEVGXmhFPNCI1dsbJCRL8W7ZeQN4z4QhUY7RgnIM22oP\/OOlMSIgwR0fDv+aFnGPEsMSFtrsiAhxnBjjQYxkW\/ch\/p\/bBQAEKCOhE6O1QBAeYFyRJI4DKXODSXEKw6EvEMrCu0oCD6GmDc7bXWAaqvq2q25i8Od2SNoAmxJaBBYEtF0wBKERiSaLmIxejQRseQclqPQcORilNqIaOSKbSJt1RM2Op28s28nl0\/m\/eGlwbfyFetc0QFzWwMIa+bT9mxQejcn5kAwDMMwnpSM+FTvtW41UH5XGfE7FeInFw8nLyXLfvaa+oP3VQj1FFktwtXgURdYIzQAoB9CH4hBAHUAAxD6HIvPJdQFDIDod1B17iLqcu0qQrVKqNZRXgF93Xm4uvOoukKfR5TN7sqmd8u54vp9UpmRh2XkDeMBUq5Jgs7kAiF4csO6eN+KoqBXNf5yBS+fyDV9913uu0nG+dG9\/TnwvnYUsMEoPQFKCGbCYgrMbTYW00S+cd9jAFwfACg\/i4A6Ajq5RCJ2r2rlhcw5wDmHfoL9BOFKK4Fb6Sq4Onx1xZtW+lokQF6rnwOIIDoUICcizzpiBynyuSW1B7DYnmsNN2ePYFliG0TDCQ0BLRI3IDQisOyApQg0E+h6Lrad5zIjGgFqgVwiYgsJGonydtZKs8pAp9241pd94dnzna3m026bA+EoOHkC3Ltw82I0Zg4EwzAME+JbZMR7y96mNrivi0PQ+APKiL8+Dv\/BcwcqfTsbaWepUk1rWZozqSJHnyLrIPo9WJNDH6B+INZidDtA9DuiLwqDEOqkdhCsRqAPQB8LId4\/iMX6AlhFiqpHSAhVIlyaEkxdsbPu3VtsuM\/A2n2GQMTunqP7Pa5+3oqKrai43lqPVSFvA+SNx2PNGYWfuovbvrEEHh+AbvcsaCtPjo8i6bndbTMGANMryb1VijUOPudvNxDbjqxG3NwAj4BrB4WdqX\/+\/MVL3\/fsBH7md8ZRwSQ6d3XgxpFyEp2zcH96T8Kh65t014egiifzXKeHpi8uPE57dRP5j6cDwK0\/m7tlAKtxq\/JqWr6ZtSaSoLVfY8XStvp1UZ9GB5BghUSlCBRwpXCNRHlhx0pQYaNrLsuLdpAQWIwgDBKCCGQIGdIWUnWyVqWZ1PP2hy8Nt2fH0BTZIbAIoUGiIWCJQpPUYgBbEJZBLgFqusjF4NAA0aTQYIxt52KzEytth9jaP4gG6rtyTJ7Iic278G5TAMGtz8yYA8EwDOPRy4j3rrsr14b7lRE\/CnfyNw6ng2ExiR1Xj3C1iutUFdgXva8kRJ+Eeh7QT68BgHVIA4VAVy2IO0DUHdAfhX4SdQk7HJXqEuqq57WsVakgVT3L0wqBGgifeMCXu19PwNPB0a3ZGGjtnnhVfKPbbb7YSLgVoU5ElP2Hculu9xk9GwZusOdxK\/sdE\/LG4zx27h4a0AHA7Biy2xhQrxf2jF56cXIybPPjL3Lovzb\/zszY8G8PJHylUTTA8xvNrF\/OY+x37ifOjQ7\/1rOT81MaL0toJotl5nbW0Tc+Dc9JdM4d2fv+OvhjjYC4URa\/\/JuxSrLJ+HkC8V4b\/pnINx5eEKD3W8SmgW5uaCG4+eexe8L1BBAodJvWrAkgkGsrYtZf4Iubrgnwg4T3LB0Ijru62YCtHAgOvZH\/wtOwmhkA2lHIHRXlOt6FDFA2t8w2li53dGS4MSM0ALQILAFskaXzQGiIWBTQVOSSR1iKcC0HLpFoBqoJcJmILYFLmc+yJKt0luvtTu1aX\/bsF863y01i3I4N4VY9ECbHCwfC2K3qKns3sat3qgc429QwDBPiWNMAFjcHQbdyUz3IjLiOwp37jweqfTsbabtZrVTSpJKFLCU0ILgaoH5E9DmwFqEBh1gD\/EB0GoDQB2CwK8QB9AuqSegHUZ\/9HOqDWOwHmNLFqofSKJfKs5JQLKzpAH0ZUC\/2xCvXw3g7GfHu93sy4kFALgkqj90GAnzNMdBqyXp5zV4ryjfpP3S3+wzDeELXSEcgnjuy9\/07nP9EIyqPwh11f3fdfTp1qB0J8eYkYLmXB4D+uUuf+8nZseEGAMY7fLg171xg9s+HPnPp5FHATazcLTA1Cn9kGvkc+S8qjh9Y7jYc32C9yIr9fF\/d89NzY\/u+l5OzP9\/9+fHRQreucdD2BmunETiBCCDOvDbysQrwzxz4VDMous266guuLVHi6xvdt4l8w4IHG5cVbHmh5q3vTLEU6wBAaSV4sN6BQHbtCZtnBrAaOCABOrJKospyD8LSUrgSQFhxInCTx5yUG6RiTm4AkUuIIhyQVfIkA2NroFVpoZ6358aGm7NEG2BbwhKAJoAlEssCGh5aDGDbMS5G+QaohotxMcC3aj7caEffIWKLTs1ElXaLseVdaI1cOdDBG2\/kPZvbe+6BsNnmdqPN99gWDoT1AYRjWOtAIJ68bqeG8W5a4rVFRhwAxu80Iw5gZWb5RtutiW0KILzySrIwcLaaI6lV4WrBdaoxurqcq1ZdqLSC3wGhTq8BJ\/aBoS\/KDXqoKnAwdmvHgQEAdRIDgKpz06gm9bzeaVWqjrGWh07NganA1FNISHiPMivuepJH3CQjzjXiO64R56VAL4S4lvOVS562yohvKMR7rrG9Ypyr1+ybpwFtWTe4gSvPzhfD2DamRuEwjZgg\/fodVf4N19m4K\/3tsBQiOsWisOHWu0i1sz6Y8K868Pb9\/VjtjN+fEhda7jcBnDw2Dk707EPHphEE8Fya\/PPrWf7Xq8TTbSGW2+z1gQl2opQ69NcTfmr21ZFPAPrpkT3zn+PkrTPsC6\/u+3pAP+CA7waIViHwNwyOSAgDCd1irt\/cPzX3a0ePwnECASbyDeMB9SDYJHhwN5mB3oKFsM6BsFkJw904EACkzjF1QJ9bybjcugcCAES5FQdCdL7c6HmkFDJRiGh3kGc+qoPIztyO8xnGhpdmgRaIBoQGyCakZZLNCCwDWnJkQ1GLUa7pXViGsBzgWxCWCbXg0YCwnOR5p1OpdKrNdmcpHcgOjp3pcAKxjI7iQToQNnIh3IkDwTCe2PjrbWTE159n6zPi5cf7lhF\/Z+r5SlZfrPRltbSSdCpJJ6m0iH4E9HmwlhP9HqEGoj\/A9zvFusgdhOoCByAMEKgJGCBUA9EHoW+OqAPn+wVfoWKlQ1Ugl8KxklL09BhIuqVk3fU5WUlx6Q4y4t2PZfdotO8lI15eF3SzNR1YTd7fOmC+hRA3MW4Y7y4i1F7OlC\/lChta3G8v8Ol5i1NfAG7kyu9qKyXEHHTOuc4ma5Q0Dv\/c5PkrM0f2\/dBAwn\/cyWIGbCy+HcFcUJ5LO1J+Wyfy2xYuj\/zO7Bj+E6DfEjkrcRnM5cEaIoYi3fs88fsj9Pt2eMdreYQgbSbwVxOEoJf7mwSiTsBPwEboGcZj6UDYKoCAO3QgFDN4782BsC4LU\/RAIGsEaiTLDSrXOg9WHAju5k2l7\/6NBLmEACAv5wOHYmOah8TnPoRGVknbVbRbs9MjzZkxdRzRiGCTQgPUIsAmpCWQDQFNp7gYiAaAZQjL3qEBh8UQfYdOTafYTlRpJwma59vtztfgYotl3dP9dCAYBp5Ep+fE9jV8WsDeWrVareQ56jk71ShXg1h3LlRC9IOI6PMu9JWd0uuRbpBAHVKfyKJhW9ExvY9QPQJ9M9OoVtmuV9uVKhWqIfq+UNijEu9BT6BKwMMjKXdigL95TUOZEV9XGx7XiPXVjHi3RnyjYK5lxA3DeARXcxJIVCwZ\/i73vPdVFwplVl6b\/ylOImgcnpOznzw\/OvKHnq66P3KlEzMS6Vajxm9kCiBc3fFrqym\/lkCxfxUgJEgI+KRYdDsSGkG4lsVAbh3YiEA2lLp0PgufPDA9\/5nisT0+WXwT+YbxLnAgcF0DxTURgWIHurI73WjTyk0ituvGCtEVv5qSTB1RZ8+codX6z95dbG+n5MKBEKGbMlw5hCwgCux0kGdZpvZu57M5DXdmx7AMoCVgmWATRAPQssQ2gRsgGhSXhbhE5xpO8UaU2oG+mQjLjmhlQQ1STYfYarernbprZld37OrY29B4srhSrV3rS6rVdqUZXb1C1kD0C6zBoc8LdSHW6NygYuwj3ECEBsrs9yCgGsm+wqKuuoCBGaLmhD6RlWaWpQKrFFMA1QpFDw96wHnA0Zed0ArHkjbNiHPl87hBRpxYacSqjlbHxW62jvEOMuLra8RvR1xbRtwwDGN7ODZZLPOXm50\/ed1Vpnam7vdey2NGbCz0u725AKAZNpymAaocldn9fpH\/8rcISmS7U5deyeLUM9XBv\/z6+LzH5Pa4VU3kG4axvT0Q7jAjtFEXpN4mihs5ELCmDvQ2HQhl3ssBbsWBAA72OhB6SxiKz9c6EFRm8FB+7PZAyAWEYlZBBJBHupDWskaOtD3QXmrYu8V4sqj0s5ZVIl1f1cFLSLyD8wAS160RL88j72+yLmlN13TeVBseezLiEtARhMKafkcZ8TXf5ubmqPVifKvslGXEDcMwHn0mgHgMcE\/\/5pUbb7869F+7gH+3J3UfvNyJodzLbmWt33iaxh0s+hIiifh06tJrmaZcO\/s2Hn+rrZW4sIl8wzCekAkMvMWiebcOhK0DCLdVx7rqQCAcwQoI9DoQDONJInY7pndbjHRHk0Lq5GV9\/S36i2wmxDfqnN7TUuSOM+KGYRjGE7vXjAIcf3Vh\/sIr+167sSP+zGDCP5cLaAQF3kLs4y7LCQDEqmdSc3DX8vi\/n73BH\/jAG5cb3SkGj+OxToTHYxagYRh4N42G2VQN6BZfd92+PT9bCRiEsiOCjfwznsyRdGtT3+vmjG95Umj13Lrp1BNufZ4ahmFs13JWZlZNn5TrcqnVgh7dpTeqqNbSHQn9N2YbAP78\/JGRX0wdf3R36l5uR2E5SCQCBIe1vanv5D0kAjEKrubp+j3dch5PLWb84ZGpuZ8HgKP3JvDDFq\/L\/X4Pd\/92cdw3+dvJ7tRZNt8wDMMwDMMwjIeeBKgQmG\/HvS7csbh7HPvu1fpTJoQSz0dX4dcTotVS5Q4z+sQ4HCfn\/s3ZDx74xdCff3eM+N7+hO+rOSbtKLSiEIrGLvEmVxk3aGpdNKl2NUfWHF2A0Ax6eynHP10MzX94aPr6tdfH4ccnEe8lg09q12DqE8+bXxcBSAhc7Wi3S3QfzKXaszP1SdVpZSpM79\/2xd\/ek1zpxL9lS4phGIZhGIZhGA8TB8pRzjkuRb+zCVx\/Io\/D1BgipgEfw29ebfFoMzInxEc0EKFGjJ4IXwIAvI54O+EZFlOVyq7755sA\/qGAn7v4TSMfyXL8kSCNAXhPzbE\/LXrNrKTMu5+7npIxRyCLQCsqawa905Y+78Ff6PTxl5\/59GwDAO61i\/6xcpQs5X76cju82N7gdXGgQLkY0ao0\/bXe2+Huyxy0OmLQ\/cjldhhui2Gj94QjGCNatOXEMAzDMAzDMAzDeFglZ1Oj8Eem11jcOT+690Xvk69rx\/DVDu4QoP10GIhilZAn0ZDQhDDviNOSO4kk\/JdmVj95aPpMa+X+R5FgGuFJKuf8\/wE2siFEy3Mo1AAAAABJRU5ErkJggg==';
@@ -364,21 +1450,38 @@ const ICON = {
 let lbN = 0;
 const busy = on => { lbN += on ? 1 : -1; document.getElementById('lb').classList.toggle('on', lbN > 0); };
 let onErrCode = () => false;
-let ID_TOKEN = '';
-async function remoteCall(name, args) {
+/* 資料層：正式版用 Firebase（db-firestore.js），預覽版用記憶體（db-memory.js）；邏輯都在 core.js */
+let DBP = null;
+function dbReady() {
+  if (!REMOTE) { if (!Demo.ready) { Demo.ready = true; window.seedDemo && window.seedDemo(); } return Promise.resolve(window.DB); }
+  return DBP || (DBP = (async () => {
+    const d = window.createFirestoreDB(CFG.firebase);
+    window.DB = d;
+    await d.start();
+    d.onChange(() => { try { onRemoteChange(); } catch (e) {} });
+    d.onError(e => toast('同步失敗：' + ((e && e.message) || e), 'err'));
+    return d;
+  })().catch(e => { DBP = null; throw new Error('無法連上資料庫：' + ((e && e.message) || e)); }));
+}
+async function payCall(action, key) {
   let r, j;
-  try {
-    r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ fn: name, args, idToken: ID_TOKEN || undefined }) });
-  } catch (e) { throw new Error('網路連線失敗，請確認網路後再試一次'); }
-  if (!r.ok) throw new Error('伺服器暫時沒有回應（' + r.status + '），請稍後再試');
-  try { j = await r.json(); } catch (e) { throw new Error('伺服器回應格式錯誤，請確認網站設定的資料接口網址'); }
+  try { r = await fetch(PAY_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payKey: key }) }); }
+  catch (e) { throw new Error('網路連線失敗，請確認網路後再試一次'); }
+  try { j = await r.json(); } catch (e) { throw new Error('付款服務暫時沒有回應，請稍後再試'); }
   if (!j.ok) throw new Error(j.error || '發生錯誤');
   return j.data;
 }
+async function coreCall(name, args) {
+  if (REMOTE && (name === 'apiPayInfo' || name === 'apiPayCheck')) return payCall(name === 'apiPayInfo' ? 'info' : 'check', args[0]);
+  await dbReady();
+  const r = await window.apiCall_({ fn: name, args: JSON.parse(JSON.stringify(args)) });
+  if (!r.ok) throw new Error(r.error);
+  if (r.queued) toast('網路不穩：已先存在這台裝置，連線後會自動上傳');
+  return r.data === undefined || r.data === null ? null : JSON.parse(JSON.stringify(r.data));
+}
 function api(name, ...args) {
   busy(true);
-  const p = REMOTE ? remoteCall(name, args) : Demo.call(name, args);
+  const p = coreCall(name, args);
   return p.finally(() => busy(false)).catch(e => { if (onErrCode(e.message)) e.handled = true; throw e; });
 }
 const isNetErr = e => !navigator.onLine || /network|網路|failed to fetch|timeout|timed out|disconnected/i.test(e && e.message || '');
@@ -414,7 +1517,7 @@ function errorScreen(e, title = '暫時連不上') {
   centerScreen(`${logoHTML(store.get('lastSettings'), 22)}<h2 style="font-size:30px;margin:40px 0 10px">${esc(title)}</h2><p class="muted" style="margin:0 0 24px">${e && e.message ? esc(e.message) : e}</p><button class="btn pri" onclick="location.reload()">重新整理</button>`);
 }
 
-/* 圖片：品項置中裁正方形、Logo 保留比例；壓到 45KB 以下（存在試算表儲存格） */
+/* 圖片：品項置中裁正方形、Logo 保留比例；壓到 45KB 以下（存在資料庫） */
 function processImage(file, square = true) {
   return new Promise((res, rej) => {
     const fr = new FileReader();
@@ -1124,46 +2227,44 @@ function renderPayPage(root, info, key) {
 const A = { view: store.get('aview', 'dash'), range: 'event', staff: '', sess: '*', q: '', conf: '' };
 const VIEWS = [['dash', '總覽'], ['orders', '訂單'], ['products', '品項與組合'], ['stock', '庫存與倉儲'], ['event', '活動與目標'], ['people', '人員與權限'], ['appset', '銷售 App'], ['materials', '簡介資料'], ['system', '系統']];
 
-/* Google 登入：ID token 存在這台裝置，約 1 小時到期，到期後自動重新登入 */
-const tokExp = t => { try { const p = JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '\/'))))); return (p.exp || 0) * 1000; } catch (e) { return 0; } };
-const tokEmail = t => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '\/'))).email || ''; } catch (e) { return ''; } };
-const loadToken = () => { const t = store.get('idt', ''); return t && tokExp(t) - 60000 > Date.now() ? t : ''; };
-const clearToken = () => { ID_TOKEN = ''; store.del('idt'); };
-let gisReady = null;
-const loadGis = () => gisReady || (gisReady = new Promise((res, rej) => {
-  const s = document.createElement('script'); s.src = 'https:\/\/accounts.google.com/gsi/client'; s.async = true;
-  s.onload = res; s.onerror = () => { gisReady = null; rej(new Error('無法載入 Google 登入，請確認網路連線')); };
-  document.head.appendChild(s);
-}));
+/* 後台登入：Firebase「使用 Google 帳號登入」（登入狀態會記住，直到按「登出」） */
 async function adminLogin(msg = '') {
   centerScreen(`${logoHTML(store.get('lastSettings'), 22)}
     <h2 style="font-size:34px;margin:40px 0 10px">後台登入</h2>
     <p class="muted" style="margin:0 0 26px">請用管理者的 Google 帳號登入。只有「人員與權限 → 管理者」名單裡的帳號可以進入。</p>
-    <div id="gbtn" style="min-height:44px"></div>
+    <button class="btn pri" id="gsign" style="width:100%;max-width:320px">使用 Google 帳戶登入</button>
     <p id="lmsg" style="margin:18px 0 0;font-size:14px;color:var(--red)">${msg}</p>`);
-  let cfg;
-  try { cfg = await api('apiPublicConfig'); } catch (e) { return errorScreen(e); }
-  if (cfg && cfg.appName) store.set('lastSettings', { appName: cfg.appName, logo: cfg.logo, accent: cfg.accent });
-  if (!cfg || !cfg.clientId) return errorScreen('後台還沒設定 Google 登入用戶端 ID。請在 Apps Script 的 GOOGLE_CLIENT_ID 填入後重新部署。', '還差一步');
-  try { await loadGis(); } catch (e) { return errorScreen(e); }
-  const gid = window.google && window.google.accounts && window.google.accounts.id;
-  gid.initialize({ client_id: cfg.clientId, auto_select: true, cancel_on_tap_outside: false, use_fedcm_for_prompt: true,
-    callback: r => { if (!r || !r.credential) return; ID_TOKEN = r.credential; store.set('idt', r.credential); startAdmin(); } });
-  const box = $('#gbtn'); if (!box) return;
-  gid.renderButton(box, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', locale: 'zh-TW', width: Math.min(320, box.clientWidth || 320) });
-  if (!msg) gid.prompt();
+  $('#gsign').onclick = async () => {
+    try { await DB.signInGoogle(); startAdmin(); }
+    catch (e) {
+      const c = String((e && e.code) || '');
+      const t = c.includes('popup-blocked') ? '瀏覽器擋下了登入視窗，請允許這個網站開啟彈出視窗後再試一次。'
+        : c.includes('popup-closed') || c.includes('cancelled') ? '' : '登入失敗：' + esc((e && e.message) || e);
+      const el = $('#lmsg'); if (el) el.innerHTML = t;
+    }
+  };
 }
-function adminLogout() {
-  const email = tokEmail(ID_TOKEN);
-  clearToken();
-  try { const gid = window.google && window.google.accounts && window.google.accounts.id; if (gid) { gid.disableAutoSelect(); if (email) gid.revoke(email, () => {}); } } catch (e) {}
+async function adminLogout() {
+  try { await DB.signOut(); } catch (e) {}
   adminLogin('已登出。');
 }
-function startAdmin() {
+function firstRunScreen(email) {
+  centerScreen(`${logoHTML(store.get('lastSettings'), 22)}
+    <h2 style="font-size:34px;margin:40px 0 10px">建立系統</h2>
+    <p class="muted" style="margin:0 0 22px">資料庫還是空的。按下面的按鈕，<b>${esc(email)}</b> 會成為第一位管理者，並匯入 VGhouse 展覽範本（場次、目標、Coin Cat 亮面／霧面、2 隻組）。之後都可以在後台修改。</p>
+    <button class="btn pri" id="frun">建立並匯入範本</button> <button class="btn line" id="fout">換一個帳號</button>`);
+  $('#fout').onclick = adminLogout;
+  $('#frun').onclick = async () => { try { await api('apiFirstRun'); toast('系統已建立'); startAdmin(); } catch (e) { toast(e.message, 'err'); } };
+}
+async function startAdmin() {
   document.body.classList.remove('phone');
-  const authErr = m => /^(NO_GOOGLE|AUTH_)/.test(m);
-  onErrCode = m => { if (REMOTE && authErr(m)) { clearToken(); adminLogin('登入已過期，請重新登入。'); return true; } return false; };
-  if (REMOTE) { ID_TOKEN = loadToken(); if (!ID_TOKEN) return adminLogin(); }
+  onErrCode = m => { if (REMOTE && m === 'NO_GOOGLE') { adminLogin(); return true; } return false; };
+  if (REMOTE) {
+    centerScreen('<div class="spin"></div>');
+    try { await dbReady(); } catch (e) { return errorScreen(e); }
+    if (!DB.email()) return adminLogin();
+    if (!DB.admins().length) return firstRunScreen(DB.email());
+  }
   loadAdmin().catch(e => {
     if (e.handled) return;
     const m = e.message || '';
@@ -1172,9 +2273,21 @@ function startAdmin() {
       const b = $('.center .btn'); if (b) { b.removeAttribute('onclick'); b.textContent = '換一個帳號登入'; b.onclick = adminLogout; }
       return;
     }
-    if (m === 'NO_CLIENT_ID') return errorScreen('後台還沒設定 Google 登入用戶端 ID。請在 Apps Script 的 GOOGLE_CLIENT_ID 填入後重新部署。', '還差一步');
     errorScreen(e);
   });
+}
+/* 其他裝置有新資料時，自動更新畫面（正在輸入或開著視窗時不打擾） */
+function onRemoteChange() {
+  if (document.querySelector('.ov')) return;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+  if (document.body.classList.contains('phone')) {
+    if (!M.sid || !M.data) return;
+    refreshSummary();
+    if (M.tab === 'stock' || M.tab === 'me') renderSell();
+  } else if (A.d && ['dash', 'orders', 'stock', 'people', 'event'].includes(A.view)) {
+    loadAdmin().catch(() => {});
+  }
 }
 async function loadAdmin() {
   if (!A.d) centerScreen('<div class="spin"></div>');
@@ -1340,7 +2453,7 @@ function vOrders() {
       <td style="white-space:nowrap">${o.status === '作廢' ? '' : o.confirmed ? `<span class="tag ok">已確認</span><br><span class="lab">${esc(o.confirmedBy || '—')}${o.confirmedAt ? ' ' + fmtDT(o.confirmedAt) : ''}</span>` : `<span class="tag amb">未確認</span><br><button class="btn sm line" data-acf="${esc(o.orderId)}" style="margin-top:4px">標記已確認</button>`}</td>
       <td>${esc([o.customer, o.phone].filter(Boolean).join(' '))}${o.address ? `<br><span class="faint">${esc(o.address)}</span>` : ''}${o.note ? `<br><span class="faint">${esc(o.note)}</span>` : ''}${o.editedAt ? `<br><span class="tag">已修改 ${fmtDT(o.editedAt)}</span>` : ''}</td>
       <td class="r">${o.status === '作廢' ? '<span class="tag">已作廢</span>' : `<button class="btn sm danger" data-void="${esc(o.orderId)}">作廢</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="faint" style="text-align:center;padding:48px">沒有符合的訂單</td></tr>'}
-    </tbody></table></div>${list.length > 600 ? '<p class="lab">只顯示最近 600 筆，完整資料在試算表「訂單」分頁。</p>' : ''}`;
+    </tbody></table></div>${list.length > 600 ? '<p class="lab">只顯示最近 600 筆。</p>' : ''}`;
   $$('#rg button').forEach(x => x.onclick = () => { A.range = x.dataset.r; vOrders(); });
   $('#fs').onchange = e => { A.staff = e.target.value; vOrders(); };
   $('#fss').onchange = e => { A.sess = e.target.value; vOrders(); };
@@ -1535,13 +2648,13 @@ function vPeople() {
     <div class="box"><h3>管理者<span class="sp"></span><span class="lab">Google 帳號</span></h3>
       ${d.admins.map(e => `<div class="linkrow"><span style="flex:1">${esc(e)}${e === d.owner ? ' <span class="tag ac">擁有者</span>' : ''}${e === d.me.email ? ' <span class="tag">你</span>' : ''}</span>${e !== d.owner && e !== d.me.email ? `<button class="btn sm danger" data-rm="${esc(e)}">移除</button>` : ''}</div>`).join('')}
       <div class="row" style="margin-top:18px"><input class="inp" id="ae" type="email" placeholder="name@gmail.com" style="max-width:360px"><button class="btn pri" id="addA">加入管理者</button></div>
-      <p class="note">加入後，系統會把試算表與 PDF 資料夾共用給這個帳號（編輯權限）。對方用自己的 Google 帳號開啟後台網址即可，第一次需要按「允許」授權。</p>
+      <p class="note">加入後，對方用自己的 Google 帳號打開後台網址、按「使用 Google 帳戶登入」即可。Google Cloud 的登入設定還在測試模式時，也要把這個帳號加進「測試使用者」。</p>
     </div>`;
   $('#addU').onclick = () => staffEditor();
   $$('[data-eu]').forEach(b => b.onclick = () => staffEditor(d.staff.find(u => u.id === b.dataset.eu)));
   $$('[data-cp]').forEach(b => b.onclick = () => copy(b.dataset.cp));
-  $$('[data-rm]').forEach(b => b.onclick = async () => { if (await confirmBox('移除管理者？', `${b.dataset.rm} 將無法進入後台，也會取消試算表共用。`, '移除', true)) act(() => api('apiRemoveAdmin', b.dataset.rm), '已移除'); });
-  $('#addA').onclick = () => { const e = $('#ae').value.trim(); if (!e) return; act(() => api('apiAddAdmin', e), '已加入並共用試算表'); };
+  $$('[data-rm]').forEach(b => b.onclick = async () => { if (await confirmBox('移除管理者？', `${b.dataset.rm} 將無法進入後台。`, '移除', true)) act(() => api('apiRemoveAdmin', b.dataset.rm), '已移除'); });
+  $('#addA').onclick = () => { const e = $('#ae').value.trim(); if (!e) return; act(() => api('apiAddAdmin', e), '已加入管理者'); };
 }
 async function copy(t) { try { await navigator.clipboard.writeText(t); toast('已複製'); } catch (e) { modal({ title: '請手動複製', body: `<textarea class="inp" readonly style="min-height:80px">${esc(t)}</textarea>` }); } }
 function staffEditor(u) {
@@ -1625,7 +2738,7 @@ function vAppSet() {
 /* ---- 簡介資料 ---- */
 function vMaterials() {
   const d = A.d;
-  $('#am').innerHTML = head('簡介資料', '簡介資料', '銷售人員在手機「介紹」頁看到的 PDF。依檔名排序，檔名前加 01_、02_ 可以控制順序。', d.links.folder ? `<a class="btn line" href="${esc(d.links.folder)}" target="_blank" rel="noopener">開啟 Drive 資料夾 ↗</a>` : '')
+  $('#am').innerHTML = head('簡介資料', '簡介資料', '銷售人員在手機「介紹」頁看到的 PDF。依檔名排序，檔名前加 01_、02_ 可以控制順序。', '')
     + `<label class="drop" id="dz"><b>把 PDF 拖到這裡</b>或點擊選擇檔案 · 單檔 25 MB 以內<input type="file" accept="application/pdf" multiple hidden id="pf"></label>
     <div class="box" style="margin-top:36px"><h3>QR code<span class="sp"></span><button class="btn sm pri" id="addQ">＋ 新增 QR code</button></h3>
       <p class="note">顯示在手機「介紹」頁最上方，點開可以放大給客人掃。填連結會自動產生 QR code，也可以直接上傳 QR 圖片（例如 LINE 官方帳號的 QR）。</p>
@@ -1664,7 +2777,7 @@ function vMaterials() {
     const m = modal({ title: '改名', body: `<input class="inp" id="nn" value="${esc(x.name)}">`, foot: `<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
     $('#ok', m).onclick = async () => { try { await act(() => api('apiRenameMaterial', x.id, $('#nn', m).value), '已改名'); m.close(); } catch (e) {} };
   });
-  $$('[data-dl]').forEach(b => b.onclick = async () => { const x = find(b.dataset.dl); if (await confirmBox('刪除檔案？', `「${x.name}」會移到 Google Drive 垃圾桶，30 天內可以還原。`, '刪除', true)) act(() => api('apiDeleteMaterial', x.id), '已刪除'); });
+  $$('[data-dl]').forEach(b => b.onclick = async () => { const x = find(b.dataset.dl); if (await confirmBox('刪除檔案？', `「${x.name}」會從簡介資料中刪除，無法還原。`, '刪除', true)) act(() => api('apiDeleteMaterial', x.id), '已刪除'); });
 }
 
 function qrEditor(q) {
@@ -1694,14 +2807,14 @@ function qrEditor(q) {
 function vSystem() {
   const d = A.d, s = d.settings, L = d.links, ec = d.ecpay;
   let mode = ec.mode, on = s.ecpayEnabled;
-  $('#am').innerHTML = head('系統', '系統', '資料都存在 ishgoodsservice@gmail.com 的 Google 試算表與 Drive。')
+  $('#am').innerHTML = head('系統', '系統', '資料都存在 Firebase（ishgoodsservice@gmail.com 的 Google Cloud 專案 ish-sales）。')
     + `<div class="cols2">
       <div class="box"><h3>網址</h3><div style="height:16px"></div>
         <label class="field"><span>網站網址（銷售頁）</span><input class="inp" id="su" value="${esc(s.salesUrl)}" placeholder="${esc(SITE)}"></label>
-        <label class="field"><span>資料接口網址（Apps Script 部署，…/exec）</span><input class="inp" id="apiu" value="${esc(s.apiUrl)}" placeholder="${esc(API)}"></label>
+        <label class="field"><span>綠界付款函式網址（雲端函式）</span><input class="inp" id="apiu" value="${esc(s.apiUrl)}" placeholder="${esc(PAY_URL)}"></label>
         <div class="linkrow"><span style="width:110px">後台網址</span><code>${esc(siteUrl(s) + '?page=admin')}</code></div>
         ${!s.salesUrl || /script\.google\.com/.test(s.salesUrl) || !s.apiUrl ? '<p class="note"><b style="color:var(--red)">網址還沒設定完成，</b>按「填入目前網址」再儲存即可。</p>' : ''}
-        <p class="note">網站網址用在：人員專屬連結、綠界付款 QR code。資料接口網址用來接收綠界付款結果通知。</p>
+        <p class="note">網站網址用在：人員專屬連結、綠界付款 QR code 與付款後返回。綠界付款函式網址用來建立付款單與接收付款結果。</p>
         <button class="btn line sm" id="fillUrl" type="button">填入目前網址</button>
         <h3 style="font-size:18px;margin:30px 0 8px">庫存</h3>
         <div class="two"><label class="field"><span>低庫存提醒</span><input class="inp n" id="low" type="number" value="${esc(s.lowStock)}"></label>
@@ -1718,13 +2831,13 @@ function vSystem() {
         <div class="two"><label class="field"><span>HashKey</span><input class="inp" id="ecKey" type="password" autocomplete="new-password" placeholder="${ec.hasKey ? '已設定（留空不變更）' : '尚未設定'}"></label>
         <label class="field"><span>HashIV</span><input class="inp" id="ecIv" type="password" autocomplete="new-password" placeholder="${ec.hasIv ? '已設定（留空不變更）' : '尚未設定'}"></label></div>
         <div class="row" style="flex-wrap:wrap"><button class="btn pri" id="ecSave">儲存綠界設定</button><button class="btn line" id="ecTest">填入綠界文件的測試帳號</button></div>
-        <p class="note">金鑰只存在 Apps Script 的私密設定，不會寫進試算表。付款結果通知網址（ReturnURL）會使用上方的「資料接口網址」。${s.salesUrl && s.apiUrl ? '' : '<b style="color:var(--red)">請先填入網站網址與資料接口網址。</b>'}<br>建議先用測試環境完整跑一次，再切換到正式並填入綠界特店後台的正式金鑰。</p>
+        <p class="note">金鑰只存在雲端函式讀得到的地方，網頁與後台都看不到。付款結果通知網址（ReturnURL）會使用上方的「綠界付款函式網址」。${s.salesUrl && s.apiUrl ? '' : '<b style="color:var(--red)">請先填入網站網址與綠界付款函式網址。</b>'}<br>建議先用測試環境完整跑一次，再切換到正式並填入綠界特店後台的正式金鑰。</p>
       </div>
     </div>
-    <div class="box" style="max-width:860px"><h3>資料位置</h3>
-      ${[['Google 試算表', L.sheet], ['PDF 資料夾', L.folder]].map(([t, u]) => `<div class="linkrow"><span style="width:110px">${t}</span><code>${esc(u || '—')}</code>${u ? `<a class="btn sm line" href="${esc(u)}" target="_blank" rel="noopener">開啟 ↗</a>` : ''}</div>`).join('')}
+    <div class="box" style="max-width:860px"><h3>資料位置（Firebase 主控台）</h3>
+      ${[['Firestore 資料', L.console], ['PDF 檔案', L.storage]].map(([t, u]) => `<div class="linkrow"><span style="width:110px">${t}</span><code>${esc(u || '—')}</code>${u ? `<a class="btn sm line" href="${esc(u)}" target="_blank" rel="noopener">開啟 ↗</a>` : ''}</div>`).join('')}
     </div>`;
-  $('#fillUrl').onclick = () => { $('#su').value = SITE; if (API) $('#apiu').value = API; toast('已填入，請按儲存'); };
+  $('#fillUrl').onclick = () => { $('#su').value = SITE; if (PAY_URL) $('#apiu').value = PAY_URL; toast('已填入，請按儲存'); };
   $('#save').onclick = () => act(() => { const su = $('#su').value.trim(); return api('apiSaveSettings', { salesUrl: su, adminUrl: su ? su + (su.includes('?') ? '&' : '?') + 'page=admin' : '', apiUrl: $('#apiu').value.trim(), lowStock: Number($('#low').value) || 0, defaultLocationId: $('#dloc').value }); }, '已儲存');
   const sw = $('#ecOn'); sw.onclick = () => { on = !on; sw.classList.toggle('on', on); };
   $$('#ecMode button').forEach(b => b.onclick = () => { mode = b.dataset.m; $$('#ecMode button').forEach(x => x.classList.toggle('on', x === b)); });
@@ -1736,27 +2849,19 @@ function vSystem() {
 }
 
 /* ============================================================
- * 預覽模式：在瀏覽器裡跑同一份 Code.gs（模擬試算表）
+ * 預覽模式：同一份 core.js，資料放在記憶體
  * ============================================================ */
-const Demo = {
-  ready: false,
-  call(name, args) {
-    if (!this.ready) { window.seedDemo && window.seedDemo(); this.ready = true; }
-    return new Promise((res, rej) => setTimeout(() => {
-      const r = window.apiCall_({ fn: name, args: JSON.parse(JSON.stringify(args)) }, 'ishgoodsservice@gmail.com');
-      if (r.ok) res(JSON.parse(JSON.stringify(r.data))); else rej(new Error(r.error));
-    }, 100));
-  },
-};
+const Demo = { ready: false };
 
 /* ============================================================
  * 進入點
  * ============================================================ */
+window.ISH = { get A() { return A; }, get M() { return M; } }; // 除錯用
 const route = page => page === 'admin' ? startAdmin() : startSell();
 const standalone = () => {
   app.innerHTML = `<div class="center"><div style="width:min(520px,100%)">${logoHTML(null, 22)}
     <h1 style="font-size:34px;margin:40px 0 14px">網站還沒連到資料</h1>
-    <p class="muted" style="margin:0 0 18px">請在 index.html 開頭的 <code>ISH_CONFIG.api</code> 填入 Apps Script 的部署網址（…/exec）。</p>
+    <p class="muted" style="margin:0 0 18px">請在 index.html 開頭的 <code>ISH_CONFIG</code> 填入 Firebase 設定與綠界函式網址。</p>
     <div class="spec" style="border-top:1px solid var(--ink)"><span>想先看看畫面</span><span>打開同資料夾的「本機預覽.html」</span></div>
     <div class="spec"><span>正式使用</span><span>照「部署說明.md」設定</span></div>
   </div></div>`;
