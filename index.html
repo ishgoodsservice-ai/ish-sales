@@ -1,0 +1,1784 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>-ish 銷售系統</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
+<script>
+/* 網站設定：api ＝ Apps Script 部署網址（…/exec）。留空時只能用「本機預覽」。 */
+window.ISH_CONFIG = { api: "https://script.google.com/macros/s/AKfycby8k9IIjY0YzzlMYE7YQyV9PYnanihiC10HJdaiLk2h4znweUm5ph1-jZDykDgdH-M2/exec" };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600&family=Noto+Sans+TC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/*
+  VOICE   清楚、自然、留白：像一間設計品牌的線上商店，不像收銀機
+  IDEA    產品頁與規格表：大字品名、髮絲線分隔、等寬小字標籤、黑色方塊按鈕
+  PICTURE 手機：今日場次＋進度、規格式數字列、方形品項圖；後台：VGhouse 式每日銷售表
+  COLOUR  白底、近黑、淺暖灰產品底；品牌橘 #E74118 只用在進度、選取與重點數字
+  TYPE    Inter Tight＋Noto Sans TC；IBM Plex Mono 標籤（呼應 -ish 字標）
+*/
+:root{
+  color-scheme:light;
+  --bg:#fff;--ink:#111;--ink2:#6A6A6A;--ink3:#A3A3A3;--line:#E7E7E7;--line2:#CFCFCF;--tile:#EFEEEC;--soft:#F7F7F6;
+  --ac:#E74118;--ok:#2E7D4F;--red:#C0260F;--amb:#A15C00;--edit:#FFF8E1;
+  --sans:'Inter Tight','Noto Sans TC',system-ui,-apple-system,'PingFang TC','Microsoft JhengHei',sans-serif;
+  --mono:'IBM Plex Mono','Noto Sans TC',ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:clip;font-feature-settings:'tnum' 1}
+button,input,select,textarea{font:inherit;color:inherit;border-radius:0}
+button{cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+a{color:inherit}a.btn{text-decoration:none}
+.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--ink2)}.faint{color:var(--ink3)}
+.lab{font:500 11px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+.hide{display:none!important}
+:focus-visible{outline:1.5px solid var(--ink);outline-offset:2px}
+h1,h2,h3{font-weight:500;letter-spacing:-.025em;margin:0}
+
+/* controls */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid var(--ink);background:#fff;font-weight:500;white-space:nowrap;font-size:14px}
+.btn:hover{background:var(--soft)}
+.btn.pri{background:var(--ink);color:#fff}.btn.pri:hover{background:#000}
+.btn.ac{background:var(--ac);border-color:var(--ac);color:#fff}
+.btn.line{border-color:var(--line2)}
+.btn.ghost{border-color:transparent;background:transparent}.btn.ghost:hover{border-color:var(--line2)}
+.btn.danger{color:var(--red);border-color:#EBC0B8}
+.btn.sm{min-height:32px;padding:0 12px;font-size:13px}
+.btn.lg{min-height:56px;font-size:15px;width:100%}
+.btn:disabled{opacity:.4;cursor:default}
+.field{display:grid;gap:7px;margin-bottom:16px}
+.field>span{font:500 11px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+.inp{width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line2);background:#fff;font-size:16px}
+.inp:focus{outline:none;border-color:var(--ink)}
+textarea.inp{min-height:96px;resize:vertical;line-height:1.5}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:40px;padding:0 16px;border:1px solid var(--line2);background:#fff;font-size:14px}
+.chip.on{border-color:var(--ink);background:var(--ink);color:#fff}
+.tag{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1.3 var(--mono);letter-spacing:.04em;color:var(--ink2);white-space:nowrap}
+.tag::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.tag.ok{color:var(--ok)}.tag.red{color:var(--red)}.tag.amb{color:var(--amb)}.tag.ac{color:var(--ac)}.tag.plain::before{display:none}
+.row{display:flex;align-items:center;gap:10px}
+.sp{flex:1}
+.seg{display:inline-flex}
+.seg button{border:1px solid var(--line2);background:#fff;min-height:38px;padding:0 14px;font-size:13px;margin-left:-1px}
+.seg button:first-child{margin-left:0}
+.seg button.on{background:var(--ink);border-color:var(--ink);color:#fff;position:relative;z-index:1}
+.sw{position:relative;width:44px;height:24px;border:1px solid var(--line2);background:#fff;flex:none;padding:0}
+.sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;background:var(--ink3);transition:.15s}
+.sw.on{border-color:var(--ink);background:var(--ink)}.sw.on::after{left:23px;background:#fff}
+.bar{height:2px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ac);transition:width .4s}
+.bar.thick{height:4px}
+.spec{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.spec>span:first-child{font:500 11.5px/1.4 var(--mono);letter-spacing:.04em;color:var(--ink2)}
+.step{display:inline-flex;border:1px solid var(--line2)}
+.step button{width:40px;height:40px;border:0;background:#fff;font-size:18px}
+.step button:disabled{opacity:.3}
+.step span{min-width:40px;display:grid;place-items:center;border-inline:1px solid var(--line2);font-weight:500}
+
+/* logo */
+.logo{display:block;height:var(--lh,18px);width:auto}
+
+/* toast & modal */
+#toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top));transform:translate(-50%,-16px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;padding:12px 18px;font-size:14px;z-index:90;transition:.2s;max-width:92vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:var(--red)}#toast.warn{background:var(--amb)}
+.ov{position:fixed;inset:0;background:rgba(17,17,17,.28);z-index:60;display:flex;justify-content:flex-end;animation:fade .15s}
+.dlg{background:#fff;width:min(520px,100%);height:100%;display:flex;flex-direction:column;animation:side .22s cubic-bezier(.2,.8,.2,1)}
+.dlg.wide{width:min(760px,100%)}
+.dlg-h{display:flex;align-items:center;gap:10px;padding:20px 24px;border-bottom:1px solid var(--line)}
+.dlg-h h3{font-size:20px;flex:1}
+.dlg-b{padding:18px 24px;overflow:auto;flex:1}
+.dlg-f{display:flex;gap:10px;padding:16px 24px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--line);align-items:center}
+.dlg-f .btn{flex-shrink:0}
+.day{border-top:1px solid var(--ink);margin-top:14px}
+.day>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;padding:12px 0;font:500 11.5px/1.4 var(--mono);letter-spacing:.04em;color:var(--ink2)}
+.day>summary::-webkit-details-marker{display:none}
+.day>summary .n{font:400 15px var(--sans);color:var(--ink)}
+.day[open]>summary{border-bottom:1px solid var(--line)}
+.x{width:38px;height:38px;border:1px solid var(--line2);background:#fff;font-size:20px;line-height:1}
+@media (max-width:640px){
+  .ov{align-items:flex-end}
+  .dlg,.dlg.wide{width:100%;height:auto;max-height:94vh;animation:up .22s cubic-bezier(.2,.8,.2,1)}
+}
+@keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(50px)}}@keyframes side{from{transform:translateX(40px);opacity:.5}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.center{min-height:100vh;display:grid;place-items:center;padding:24px}
+.spin{width:24px;height:24px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:rot .8s linear infinite;margin:auto}
+@keyframes rot{to{transform:rotate(360deg)}}
+.lb{position:fixed;top:0;left:0;height:2px;background:var(--ac);z-index:99;width:0;transition:width .5s}
+.lb.on{width:75%}
+
+/* ========== 手機 ========== */
+.m{max-width:560px;margin:0 auto;min-height:100vh;padding-bottom:170px}
+.m-h{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);display:flex;align-items:center;gap:12px;padding:calc(14px + env(safe-area-inset-top)) 18px 14px;border-bottom:1px solid var(--line)}
+.who{border:0;background:none;display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0}
+.who i{width:28px;height:28px;display:grid;place-items:center;background:var(--ink);color:#fff;font-style:normal;font-size:12px}
+.pad{padding:0 18px}
+.hero{padding:22px 18px 22px}
+.hero .top{display:flex;align-items:center;justify-content:space-between}
+.hero h1{font-size:34px;line-height:1.08;margin:14px 0 6px;font-weight:500}
+.hero .sub{color:var(--ink2);font-size:14px}
+.hero .ann{margin-top:18px;border-left:2px solid var(--ac);padding:2px 0 2px 12px;font-size:14px;color:var(--ink);white-space:pre-line}
+.hero .prog{margin-top:22px}
+.hero .prog .nums{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+.hero .prog .big{font-size:52px;font-weight:300;letter-spacing:-.04em;line-height:1}
+.hero .prog .pc{font-size:20px;color:var(--ac);font-weight:500;margin-left:auto}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.stat{padding:14px 18px 16px;border-left:1px solid var(--line)}
+.stat:first-child{border-left:0}
+.stat b{display:block;font-size:24px;font-weight:400;letter-spacing:-.03em;margin-top:6px;line-height:1.1}
+.stat b small{font-size:.55em;color:var(--ink2);margin-right:2px;letter-spacing:0}
+.sec{display:flex;align-items:baseline;gap:10px;padding:28px 18px 14px}
+.sec h2{font-size:24px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 12px;padding:0 18px}
+.tw{position:relative}
+.tile{display:block;width:100%;padding:0;border:0;background:none;text-align:left}
+.tile:active .ph{transform:scale(.985)}
+.ph{aspect-ratio:1;background:var(--tile);display:grid;place-items:center;overflow:hidden;transition:transform .08s;outline:1.5px solid transparent;outline-offset:-1.5px}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph .ini{font-size:40px;font-weight:300;color:var(--ac)}
+.tw.in .ph{outline-color:var(--ink)}
+.t-b{padding:10px 0 0}
+.t-n{font-weight:500;font-size:15px;line-height:1.3}
+.t-s{color:var(--ink2);font-size:13px;min-height:1.3em}
+.t-m{display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px}
+.t-m b{font-size:15px;font-weight:500}
+.badge{position:absolute;top:0;right:0;min-width:36px;height:36px;padding:0 8px;background:var(--ac);color:#fff;font:500 16px/36px var(--sans);text-align:center;pointer-events:none}
+.minus{position:absolute;top:0;left:0;width:36px;height:36px;border:0;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#fff;font-size:20px;line-height:1}
+.cartbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(60px + env(safe-area-inset-bottom));width:min(560px,100%);z-index:30}
+.cartbtn{width:100%;display:flex;align-items:center;gap:12px;height:58px;padding:0 18px;border:0;background:var(--ink);color:#fff;font-size:15px;font-weight:500}
+.cartbtn .cnt{background:var(--ac);min-width:28px;height:28px;display:grid;place-items:center;font-size:14px;padding:0 6px}
+.cartbtn .tot{margin-left:auto}
+.tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:min(560px,100%);display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:25}
+.tabbar button{border:0;background:none;height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--ink3);font-size:11.5px;position:relative}
+.tabbar button svg{width:21px;height:21px}
+.tabbar button.on{color:var(--ink)}
+.tabbar button.on::before{content:'';position:absolute;top:-1px;left:30%;right:30%;height:2px;background:var(--ac)}
+.pend{display:flex;align-items:center;gap:10px;margin:14px 18px 0;padding:12px 14px;border:1px solid var(--amb);color:var(--amb);font-size:14px}
+.empty{margin:0 18px;padding:40px 16px;text-align:center;color:var(--ink3);border:1px dashed var(--line2)}
+.mat{display:flex;align-items:center;gap:16px;width:100%;padding:16px 0;border:0;border-bottom:1px solid var(--line);background:none;text-align:left}
+.mat .ic{width:46px;height:58px;background:var(--tile);display:grid;place-items:center;font:500 10px var(--mono);color:var(--ac);flex:none}
+.mat b{display:block;font-size:16px;font-weight:500}
+.ord{padding:16px 0;border-bottom:1px solid var(--line)}
+.ord.void{opacity:.4}
+.ord .hd{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.ord .it{display:flex;gap:8px;align-items:center;margin:2px 0}
+.minibars{display:flex;align-items:flex-end;gap:10px;height:140px;margin-top:22px;border-bottom:1px solid var(--ink)}
+.minibars .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;position:relative}
+.minibars .v{font-size:12px;color:var(--ink2)}
+.minibars .b{width:100%;max-width:36px;background:var(--ink);position:relative}
+.minibars .b.now{background:var(--ac)}
+.minibars .b.future{background:transparent;border:1px dashed var(--line2);border-bottom:0}
+.minibars .tg{position:absolute;left:-5px;right:-5px;border-top:1px dashed var(--ink)}
+.mlabels{display:flex;gap:10px;margin-top:8px}.mlabels span{flex:1;text-align:center}
+.line{padding:16px 0;border-bottom:1px solid var(--line)}
+.line .top{display:flex;align-items:baseline;gap:10px}
+.line .nm{font-weight:500;flex:1;font-size:16px}
+.line .ctl{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.pr{width:104px;min-height:40px;padding:6px 10px;text-align:right}
+.grand{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 4px}
+.grand .n{font-size:34px;font-weight:300;letter-spacing:-.03em}
+.lbl{margin:22px 0 10px}
+.bund{display:flex;align-items:center;gap:12px;border:1px solid var(--ink);padding:12px 12px 12px 16px;margin-top:16px}
+.bund .t{flex:1}.bund b{display:block;font-weight:500}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.qrbig{width:min(300px,80vw);aspect-ratio:1;margin:22px auto 10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);transition:opacity .3s}
+.qrbig svg,.qrbig img{width:100%;height:100%;display:block;object-fit:contain}
+.paystat{text-align:center;margin:6px 0 14px;font-size:16px}
+.paid{color:var(--ok);font-size:26px;font-weight:500;margin:0}
+.change{display:flex;align-items:baseline;justify-content:space-between;margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+.change b{font-size:44px;font-weight:300;letter-spacing:-.03em;color:var(--ac)}
+.qrgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 12px;border-top:1px solid var(--ink);padding-top:18px}
+.qrcard{border:0;background:none;padding:0;text-align:left;display:grid;gap:4px}
+.qrcard b{font-weight:500;font-size:15px;margin-top:6px}
+.qrbox{aspect-ratio:1;background:#fff;border:1px solid var(--line);display:grid;place-items:center;overflow:hidden;padding:8px}
+.qrbox svg,.qrbox img{width:100%;height:100%;display:block;object-fit:contain}
+.srow{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.srow .thumb{width:52px;height:52px}
+.srow b{font-weight:500;display:block}
+.srow .q{font-size:30px;font-weight:300;letter-spacing:-.03em;text-align:right;line-height:1}
+.srow .q small{display:block;font-size:11px;letter-spacing:.04em;margin-top:4px}
+.mtx{font-size:13.5px}.mtx th,.mtx td{padding:9px 6px}
+.mtx td.cur,.mtx th.cur{background:var(--soft);font-weight:500}
+.names{border-top:1px solid var(--ink)}
+.names button{display:flex;align-items:center;width:100%;padding:20px 2px;border:0;border-bottom:1px solid var(--line);background:none;font-size:22px;font-weight:400;letter-spacing:-.02em;text-align:left}
+.names button:hover{background:var(--soft)}
+.names button span{margin-left:auto;color:var(--ink3);font-size:18px}
+
+/* PDF viewer */
+.viewer{position:fixed;inset:0;background:var(--tile);z-index:70;display:flex;flex-direction:column}
+.v-top{display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;background:#fff;border-bottom:1px solid var(--line)}
+.v-top b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.v-body{flex:1;overflow:auto;padding:14px 0 40px;-webkit-overflow-scrolling:touch}
+.pg{position:relative;margin:0 auto 14px;background:#fff;width:min(100% - 20px,900px)}
+.pg canvas{display:block;width:100%;height:100%}
+.pg .pn{position:absolute;right:8px;bottom:8px;font:500 11px var(--mono);background:#fff;padding:2px 6px;color:var(--ink2)}
+
+/* ========== 後台 ========== */
+.a{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.a-side{position:sticky;top:0;height:100vh;border-right:1px solid var(--line);padding:28px 0 20px;display:flex;flex-direction:column;background:#fff}
+.a-side .logo{margin:0 24px 36px;--lh:16px}
+.nav{display:flex;align-items:center;gap:12px;width:100%;min-height:40px;padding:0 24px;border:0;background:none;text-align:left;color:var(--ink2);font-size:14px}
+.nav::before{content:'';width:6px;height:6px;background:transparent;flex:none}
+.nav:hover{color:var(--ink)}
+.nav.on{color:var(--ink);font-weight:500}.nav.on::before{background:var(--ac)}
+.a-side .me{margin-top:auto;padding:16px 24px 0;border-top:1px solid var(--line);font-size:13px;word-break:break-all}
+.a-main{padding:28px clamp(20px,3.2vw,56px) 80px;max-width:1440px;width:100%}
+.crumb{margin-bottom:14px}
+.a-head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-bottom:24px;margin-bottom:28px;border-bottom:1px solid var(--line)}
+.a-head h1{font-size:clamp(34px,3.6vw,52px);line-height:1.02;font-weight:500;letter-spacing:-.035em}
+.a-head p{margin:12px 0 0;color:var(--ink2);max-width:70ch}
+.a-head .tt{flex:1;min-width:260px}
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--ink);border-bottom:1px solid var(--line);margin-bottom:48px}
+.kpi{padding:16px 20px 20px;border-left:1px solid var(--line)}
+.kpi:first-child{border-left:0;padding-left:0}
+.kpi b{display:block;font-size:clamp(28px,2.7vw,42px);font-weight:300;margin:14px 0 6px;letter-spacing:-.04em;line-height:1}
+.kpi .s{font-size:12.5px;color:var(--ink3)}
+.kpi.main b{color:var(--ac);font-weight:400}
+.kpi .bar{margin-top:10px}
+.box{margin-bottom:52px}
+.box>h3{display:flex;align-items:baseline;gap:12px;font-size:22px;padding-bottom:14px;border-bottom:1px solid var(--ink);margin-bottom:4px}
+.box>h3 .sp{flex:1}
+.box>h3 .lab{font-weight:400}
+.cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:48px}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:48px}
+.fig{position:relative;height:280px;margin-top:16px}
+.fig svg{position:absolute;inset:0;width:100%;height:100%}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;font-size:12px;padding:7px 10px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .1s;z-index:2}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+.t th{text-align:left;font:500 11px/1.35 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--ink2);padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:bottom}
+.t td{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.t th:first-child,.t td:first-child{padding-left:0}
+.t tbody tr:hover td{background:var(--soft)}
+.t .r{text-align:right}
+.t tr.void td{color:var(--ink3);text-decoration:line-through}
+.t tr.void td:last-child{text-decoration:none}
+.t tfoot td{font-weight:500;border-top:1px solid var(--ink);border-bottom:0}
+.t.daily th{white-space:normal}
+.t.daily th.r{min-width:68px}
+.t td.ed,.t tbody tr:hover td.ed{background:var(--edit);padding:3px}
+.t td.ed input{width:100%;min-height:36px;border:1px solid transparent;background:transparent;padding:4px 8px;font-size:14px}
+.t td.ed input:focus{outline:none;background:#fff;border-color:var(--ink)}
+.t td.ed input.r{text-align:right}
+.scroll{overflow-x:auto}
+.thumb{width:44px;height:44px;background:var(--tile);overflow:hidden;display:grid;place-items:center;flex:none;color:var(--ac);font-weight:300;font-size:18px}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.blist .bl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.blist .bar{grid-column:1/-1}
+.cell{min-width:58px;min-height:36px;padding:0 10px;border:1px solid transparent;background:none;text-align:right;width:100%}
+.cell:hover{border-color:var(--ink)}
+.cell.neg{color:var(--red)}.cell.zero{color:var(--ink3)}
+.drop{display:block;border:1px dashed var(--ink3);padding:44px;text-align:center;color:var(--ink2);transition:.15s;cursor:pointer;background:var(--soft)}
+.drop.over{border-color:var(--ac);background:#fff}
+.drop b{display:block;color:var(--ink);font-size:20px;font-weight:500;margin-bottom:6px}
+.imgbox{width:180px;aspect-ratio:1;background:var(--tile);display:grid;place-items:center;overflow:hidden;cursor:pointer;color:var(--ink2);font-size:13px;text-align:center;flex:none;border:1px dashed var(--ink3)}
+.imgbox img{width:100%;height:100%;object-fit:contain}
+.ed2{display:flex;gap:24px}.ed2 .fs{flex:1}
+.note{font-size:13.5px;color:var(--ink2);border-left:2px solid var(--line2);padding:2px 0 2px 12px;margin:14px 0}
+.linkrow{display:flex;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.linkrow code{flex:1;font:12px var(--mono);background:var(--soft);padding:9px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.togrow{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
+.togrow div{flex:1}.togrow small{display:block;color:var(--ink3);font-size:12.5px}
+.swatches{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.swatch{width:34px;height:22px;border:0;outline:1px solid var(--line2);outline-offset:2px}
+.swatch.on{outline:1.5px solid var(--ink)}
+.appset{display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:48px;align-items:start}
+.phonebox{position:sticky;top:24px;border:10px solid var(--ink);border-radius:44px;overflow:hidden;background:#fff}
+.phonebox .scr{height:740px;overflow:auto}
+.phonebox .scr .tile,.phonebox .scr .who{pointer-events:none}
+.phonebox .scr .m-h{position:static}
+.phonecap{text-align:center;margin-top:12px}
+@media (max-width:1200px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.kpi:nth-child(4){border-left:0;padding-left:0}.cols,.cols2{grid-template-columns:1fr}.appset{grid-template-columns:1fr}.phonebox{position:static;max-width:392px}}
+@media (max-width:860px){
+  .a{grid-template-columns:1fr}
+  .a-side{position:sticky;height:auto;flex-direction:row;overflow-x:auto;padding:12px 8px;z-index:20;border-right:0;border-bottom:1px solid var(--line);align-items:center}
+  .a-side .logo{margin:0 14px}.a-side .me{display:none}.nav{width:auto;white-space:nowrap;padding:0 12px}
+  .ed2{flex-direction:column}.two{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{border-left:0;padding-left:0}
+}
+.demo{display:flex;align-items:center;justify-content:center;gap:4px;background:var(--ink);color:#fff;padding:6px 10px;flex-wrap:wrap}
+.demo span{padding:0 10px;color:rgba(255,255,255,.6);font:500 11px var(--mono);letter-spacing:.06em}
+.demo a{padding:5px 14px;text-decoration:none;color:#fff;font-size:13px}
+.demo a.on{background:#fff;color:var(--ink)}
+.demo+#app .a-side{height:calc(100vh - 40px)}
+</style>
+</head>
+<body>
+<div class="lb" id="lb"></div>
+<div id="app"><div class="center"><div style="max-width:440px;text-align:center"><div class="spin"></div><p class="muted" style="margin-top:24px;font-size:14px">載入中…</p><noscript><p>請開啟瀏覽器的 JavaScript。</p></noscript></div></div></div>
+<div id="toast"></div>
+<script>
+{
+/* ============================================================
+ * 共用
+ * ============================================================ */
+const API = String((window.ISH_CONFIG && window.ISH_CONFIG.api) || '').trim();
+const REMOTE = !!API;
+const DEMO = !REMOTE;
+const SITE = location.origin + location.pathname;
+const LOGO = 'data:image\/png;base64,iVBORw0KGgoAAAANSUhEUgAAA\/kAAABICAYAAACtOzVBAAA\/5UlEQVR42u29eXRd2XXe+X3n3PsGDCwORQBksarIKpZkl20pcSmO4pYEsMqR1bHjyMuGOu6MzmDHsZPuTtpZ6SQ2CU8dZzmJ3R3HidIrnXTL6aSwMrRbiR1bMgFZ7ciOaq12bFFWsYosTpg4E8Cb7j3n6z\/ufcADCIATOBS5f2uRGN\/De\/e9e+759v723pw9MiIYhmEYhmEYhmE8RASoQrATsdBW872Hpq9fE0ACplfu5niOw3MS4dQfGHn+qTr+agS+JYs46AiSuJaS\/6mD8PdHPrvwGQGOQLSjtjlHATcBxJmxkc8OJnx1MVcg4de\/hxOCecSNLMm++vnPXJ7p3u5BPlZnL5dhGIZhGIZhGMZjJPCPwnES4ezYvm\/eVeevV537SwRfIOEEEMAuT\/yhCvwvXxgb\/hECUUdNGz4uJHYIDMN41K5L2jC4X\/zPnp+Ta3+XduwMy4KtOR+k4rRg9\/ThxqcL7fQxDMN4nK4FDhPQ3EeGvi5x+r9BVm+EmAPw3fU+ClguMtEcrvofujA6vMCJ+X\/w+jj8JyYR7CiayDcMw4R4cU3RimBYK7558+93BUhXfJRePBKgQ+EZI4ofuOL7IAv7UfdzgnDs8UfZ62I84bBHvkcVJ6VUeARVnrhC+bWKUzaW31v50BNM2+rcXfN1969ywwCCxeAMwzDwYH3lnIBmnPvxPu+q17KYkUhvumYQXkC8msXoiB+b+djIv9o\/OXfRSiRM5BuG8QRkxMsNPcFCW7NHdBOAK8Q22SvOe37ObgKxJ10YBUSo\/IgVIdKJQoSyKLYJdSR0KLVFZoCWADYBNCAsA2p5YjEALQDLDliMES0hXvd2cTKeFBwYo3sKDnUAAwD6PVALwiCBmoh+An2A6gAHIKUiq4CqAFOWH6uOdGXArRtocz2BNGFtJODmoAFWggax5+fd26rnZuTa8\/MeHAgWQDAMw1i7npITiAsffnpfDr22mEeBm2s+Aq4TEXam\/qnrzfjNAD41NQqPaeR2NE3kG4bxiGTEu5m0mzLiPUJ8fUbcleodunnD3X1AuYAgIJeQF48wOCkLYgdQC0SzFONNCs1IdSjeANAsxDmWQTScsBiBlgOWItHwQiMHl0g1AS4TaoUQOnVWm1kl71R8p7Xn7EgLJ05kFlU2jHvf\/GH85fTy4lwtC2kt7fhKU+266KsCqwnUL7EOaCAQfU7qi8SgE6qR2AEVgQQCAyLqhAYBVgHUINVFVsvfqTmqEsEUgE8IJiQ9wYRrVfsalc5uwE+bBhC6kQJzIBiGYWzAOBwmEfIkeanq2NeO0q1KshwhAiL1fgCfsoNoIt8wnkghviK+N8mIc7NaWd2c2HbrRLcjN7Gmr72hQ28GfNWS2934tqMQgSxGdAi1BWSE2iDbEhoAGoUAxzKgpiMaEJYi0ASxCBXZckcuRqntgaUItXKimQjLuUJ7B7l4HUleT1vZ0lJ\/ZyE7n3\/gDWTb\/xJcWSNSjgE8dhTACRALaw\/3lL1fjSeUsfXfGILwMnRsAjiGcgMHCJMnOgA6AG5s59\/\/4itIh9IDycDAcqWZ1VJXzdOsiYGEvtom+oNUd2AtAAOOqEZpEEQ\/iD4IgxD6nEN\/FPoA1AH0lx\/7QPQTqkisgqpArJCoAEhrjkVQs7tm9gQuu+vk7TkQdNP3VqqAypuh2AhvuL5v5kBYE0ywHgiGYTwg6LSj6qh2QMS6DvBbVHwN2JEzkW8Yj9zYle3IiK9J4nDjjDh5szhf2Vhu0giLAAJUZsOLDWVePOhcUSEUGfC2qCalNsAWiCakDskbEpqClgEsgmgmwGIuNEE0ACwhoglgSeIyU7UY1UzSpN1pq+UUW81au\/PC1Rca+NY3AifuxxiPq2uzhUfByRPgeFd8L4DrRcgUgLGh1ddtEsD4y8XXXWGyLqumMpuviQl7zxvG7dJzurB37TvWDZgB6D1fb+ecXTlfJ4rzsgjwnc9QBA+3vUs0Pv2KP7XrVF\/fcqUaEletVFkLWV5dovpqcFXl6g\/AQFG2oAFE9DuHehQGwdKBIPSL6KM0CLJSuA5UKx0IfSQqkOogPYAkJehIJAQ9AQ+uWdPXr\/UbORBWgwYbOBBWrlLFx21yIFgAwTAMKHCxXZRg8Q56tzbtyJnIN4x7FuJbZcQ3q9fE5hlxroruzYV47w27X0et3aB1m1QFdWvEi4w4qA6EjMXHhgohvuxKsR2lBqG2yBtQKb5XbOq8EaU2HBqMaoBoZlENsNLs82h2Onmn5avZwb2hjYXzGe9LLdQbwBt3lxHfYGO\/4Uuzki2cuHdrvel4w9j+ZXjdbm\/bAmbaWFwSR9cGEKbWrTVjt+NAmEAE3ogArm\/3AfniK6+kr7wwn1xb8NVm3k4rlbQSAuptdeo50Z+AtbZjHyL6UqKaUTsg9DmgPwIDKIIGOwhWQfRFoR9EjeVHQH0SK6RSipVIVBxQ9EDo9jJZFyh2XNsocTMHwpoGirdwIODWfVfW90DgBuu7BRAM41FnskjkpEl2shOSZumg2tKyv5ITI357w3XZMJFvPJb29LvOiPdsGHizEAdIcm0mfHWjs+lYNAJBazPiQUAUAqQQyYakNqEWgBbANommoBaEZYFLZGwKXILQINVU5CKIBoglCMuJQ0OBi9HHDoOavpK2MsQ2W2g2a+3OC7v2NSdxItzvESP3IyO+RohbRtwwDGxbZ39tuIxN3Hugb30A4di2OhDeyFCUGW17Buv1cfhxvOxPXZ2t11vVSrXGeg5XjTGrtwOLHgbAAIl+RfQRcUBinU6DUeijWCc1CLAOqL8oW2AtCn2EKgDqAqskqpL6AHrHogeCJ+G7DoQN+mT3frkmwL3RBIb1AQQVx063747b0oFg\/Q8MY3vXYh2F48TlmZmxkV\/Zkbpvu5rHDLi5u3656Y+Jg7uWxeVONfwSAGDaRuiZyDce5Yx5cSHuieDfTka8W9vY7ZremxHvzTisz4hjzeZAvRsC5AKyKAjqKCIPRMeJnQjlLDqmt1TUhDcJNQkuBajtiEWJy6QaUiHEPbAcYiHOISznUAsejQq0nOVpx+ehXa+0Oo3Bvs7+xdnO\/cmIX92yRnwKG9fLbrLRxDFsIcQtI24Yhm1abyrHul8OhGPFmo6NHAhj61xOK+s6sOJA6K7ZBFQEgk8EFD0Qtvc6P4pkrjJcrXeqaavdqsTEV9Mkq3TIfgT05QlrIcOAA2veqS8IAwDqpAYl9pHqhzAIsAaoX2AdRJ1CH6CawAFSKcAUUKWYxIC04sik28R1nQNh\/V6g14HQO8ZxTT+Zu3QgSDeZ8gzDWLe2zVF\/oxH0Wt2xvxmVQfArXh1BIKIjuCt1\/mIn\/6GD\/\/HSrMbhOWki30S+8XCF\/LpmQBJIwqdlJ+PUbZIVLz\/JCys6glaz4xGIiMoAtgC1AHUANEG2iwZuXKLUBLgExkaRDeeipPZKwzaHZYWiY7p37kaIsZMztqpejTwkHSZqJtc7rcX6YOfg0Jns\/iwm13vHhbpu1gcnimd\/pxnxjezp25kRNyFuGIbxiAQQtmdRpjYpX7gbBwJ63FkTQCwC2PP3ZcSVxuHfWXg+fSq5Ub0a05oLrPcnrqKY1TvB1YJzlRDjDol1+qL\/QbeBosAaoYHia\/YBGhBZJzQgsAqpWjRUZAVAjUVPhNQBrteB4Agk5JoMxXr3QSf2THwR4kpQwAIAxpO+rk0g6ijcvon5L50ZHfr4YOI\/tSd1w60oZGVkzTuy6ujaUbjUCT+y\/\/jC3zeBbyLfeEgZ+W6HdpZ2vLSIqK9cCHMIzSAE4Voe43w74rSEBQANgYuimgm4GIBlUk0XWHRMd2gkwnLO2EodF\/NOkiVp3qmGertVaWUjnfk2p+5HRnzjrulTU3DYonP0nWbEJ4BotnTDMAzjIfY\/uOfyhXtxIGw1gWRsDHFND4RJBOBMANDCNvdB6DoQOs1KpVppVdIkqWQhTxk1mEdXa1H9SUSf86xFxZWgQQQGKJZjG9FHYljAIYrDicNTfQm9Lw9JKfyRlR8hhN5kiAUAjCdJ6HNi4TNvju7+QEDl+yCMZREHHeECdDkG\/UYn6pP7puZ\/Q4AzgW8i37gPQp6FbWZFyINFVDshmZY1dWRx8WoFIROWQowzIs95xJNReIfOvRkDzrGjsyMH5i9v98mqrkv\/6OYZ8al1jdo2aNa2UUYc6zLi0TLihmEYhvEAHAjTa66f2+ZAWN+olYB6HAjL2xEwmPdDe3Lnnl0KeDYovDcBDgbwPQ44EIX9qUN\/PaH3ZaYkqMhkrncAsNx7yQIAxmMp9K+cB\/A3AeDsBw\/Un306EK\/MtrrTlorfuR+TlwwT+U+AkGfZw4brhLwnmHI1I08Uo9ZaAcikpVy62AHeidJpD30lEu8kcG+nPpl9ete5+a2EvI7Crc+K30tGvCvETUkbhmEYhjkQtmEKA3EXDoSxMUROIAcW5gHMA\/gi1kxNQDr01IEhhHxfHuOLzuH5IH61Aw4CeF7A3go5UEuwEgDodQCEdQGAshySsgCA8S4U+kcBNzYKNzaNwC+cL5qMfroozZksfscy+CbyjbvJyPt1GXlXdohvFbPZmpkw24ZmCL4F4G1HfCWGeC5Jw9mrya7L7\/mlt9pb\/F03NQo3BgDdyHk5PqOMykXLiBuGYRiG8Sg6EO5q0zG9GjCYHIcbB9BtfDs2jcg3kAHnLwC4sD4A8ObHDld3d648nYfk2Yb4XC5+VUIcyqGXHLhf0EjVuXrNwTtyZYpP1wEQhSit9kPq9gCwAIDxqDIBxInpMmvf8x59t9jzu9Omum6i7vd7+mZpkwkv76pGib1jZ7GBE8pE\/gOY804hlu1zVY6F8R5gUtbIp6W1Pq4K+UZHupQBZwScpfgmwLeh8HZM\/cxi0j+\/uZC\/vEbIT91cPxcxbRYbwzAMwzCewIDBBkJlfZ+f7v5pahqx3G91AwBfWHO7jx2uzuTLw8rC\/uvOvZRIhwLwXlLPCXgewNNV5+pVB7jSAdCt\/c+KZsZi0c+46KFU7M5dd4KRvWrGNrhf7st9P0IimToKYgoOQ0WPkNudNvX6OPz4Ajg5BI1PIj7qwn\/FYVE4k+JWrikBDqNwWP3drQ\/i7JER2emzqbUeZCnmy1FzjnCJIyoEPFcX+FYUWiF2nMNsFOc8eDIHziTQV\/LI00hxNiz5i891LTKbnWjjcFgAb8rIv8ujU4ZhGIZhGI+KaDoG8GvGy\/KAct+FW4iCsx88UB8YCHtbQQc9cDAA7\/XA80F4idQ+gCM1x7TqVhM9hfhfdQCsm4jkekcY2ytT7MErBDsRC20133to+vq10iFh++An4LycGoU\/ssHo6+uv7d9zI+vsrqaVAeXqzwklAnOPRsyzxaeYXt0xPXtp\/e2OjyIZm0YkticZehRwE0CcGRv57GDCVxdzBRJ+\/Xs4IZhH3MiS7Kuf\/8zlme7t1kz9Ggd7nRT62OHqXHNxn0\/8rixXPwBUUrWaWbj2bMXN8lfml3vLsXsc27BM\/gYZ+ZtG0AHOAS5xhbU+IVwh5IWOgFaInSzgUkachXAOiF8BcdqDbzHg3HArneNtCvkpABeLSJNWbBjW1dIwDMMwDAP32QEgTG5umZ0cB\/d2+wJ0AwDF\/u5s+e9za273rfv6FpbzfVnwBxohHk6IQ1F8D4nnBDxPYHdfwkqFAMsSgExA3g0AoBAivYklCwAYeuWV9OquU31XAey6D\/ffvd+YUHt+6criwwimdLURJxEwjVwAr7267\/dm0qiEDwbi5WYMw94lu6nofcIVAeskZC4Jy4jXZseG5z1xgnBvUPH4nr3zX+RkETDQODwekcx+d0zhxCRw5Zv2PZdFfBuhb5pvL70PDvuoWKslxSmvSCTO5xdzzFx8deR3HfRZOf4\/nJj78q2e1+Mu8rt18etnyTtXdK5H6gt7fTcj34lCIyhkUQsZNEPx7Ui9k0BfCcA7LsazBOaGpy4u3a6QHxuCjk1Cx0zIG4ZhGIZhvGsDAMcAHhsHp9YHAD492wDwdvlvuvd2F79xz2BM3fCS+HwFPJiT73HEoSi8RGBYwHCfo6s4OpY9m0K5Jw0CohDXO0tRmAVWGxcajxXHR5EcmUZ+YeDCx3ei+o\/rQaGFtRnj7aAOKAeY57hy7qMHvgG\/fP7Kg3ROrHT1n0S4+E179iMmf+IS+F2A3j+YOEQIWSz6YQBAJqhUdys4wntyT0ruSR1eduB3LgeHS5eGT1w84v5tM+b\/jJMX3+oV2A+zrwAnEM4c2ftiH\/xfz6M+MejdjgigUz7P9c\/RAYl3fK5CPJfQfXQxjz92+bWRT7dz\/AQn577Yve\/1r1nyOAt5Eq5CIvFgyrW1U82gPJOu5rnOCThD8s0onHaIbyU+OecWW3NP\/+aVG7dlrV9d5LfMyFsjO8MwDMMwjHd3AGBiCwcAxsF1e8PIX7+8CGARwFvrb3fpY7t3tNq1fa08f7YBd9g5HJLwVaCeBfAsxF39CX3K1QBAkf0v9rMqJgBEWAAAj6nzuJY67nKhKBO+D\/ePlEAIci5EPvCM9gTC74zuHdjrkh9E1A8MeLe7FYVmFK7mMb8dV0sEFIueGEKAQAmArzv3cs3xZYbkv7v06r5PXgr4nzk5e+lhCP2vKR63OIE4PzbyFxOHH+\/zbueNPOJa93luMr4zAupEqa3iuRFI+537diTxD8+\/NvJ3\/mE+d5SFA8L1liUk7yp7fY+QR9H8jiB82pOR9+Vx6UhoBCGXFjoB84ROReGUB78SwHcqdO94X5vb\/ZlT17ds\/LAuIw+z1huGYRiGYRh3WAKAdQ4ATiI8\/UtXbgC4AeArAD7Te7vTo8\/vHEBnZDnTQed1UMJXQTgk4gUHDQPc258UDgCoGL\/cbQCYC5AQ1oxtXg0AmPh\/l+DImAmKQIja\/kx+qfMJInsYlvULr+77cI3xH\/V7vnwjXxH2jkWzyuR23qkr72eu\/e1mVGxGRUcM7EzcXwHid54bG\/6LnJz\/9w9c6I8DUwvw827kH+1I3Z9dzIWrWcxRxG62fJ7l8yNXf0fXshgd4fek7m98v0Y+8PHR5n\/Don\/FitBPHnUh332hUxad61O3KuQzCctByqOuRuF8UzrvyJORestFd1IO5+qdyuzOz5+9eqs32pqoazGuQESxANsSYxiGYRiGYdyXAMBRECcKB8AUiqQSJxEOTZ+5BuAagN9df7uzHz2wO8nzkXbU80t5eE9CdyiX3uPIA4IOENw5mND7ctpTkFYaAObFowla3WtbAODRfv8QAsntf23Uc\/94gKUInER+\/sjwd9eoT3q45HIWc96G4L3D4+YAuCjoShZDzfG5Qc9Pz4yN\/I+cnPu73ZKI+\/lc+7rn+CTi\/JHh13el7jsv9Yr7u3xqjvACdCmL2e7UfVSq\/4f50cpHMX2x0bXuJw9rljy0RsiThE8Ipo5MXPkKs4hGNqMQpMu5tNCJPBWgdxzjSQW+XXE4vVxJZ5\/75fNXcBsjFVYy8ibkDcMwDMMwjIcdANhkNFhvAGDFAVCOzyr3vVcAnADwi723uf7RA7tarc4zy8AhRxzKIt\/rgecj8YIDhjy5u+bpU1eEH3IUJQBZ2QtAQujdo29mIzaMu8zg5+dHh797V+L\/6WIe1ZaC460Fb1dDsqxYZ\/ccuUVwqvxZ0gqKJLArdT91YWw4eWZq\/ifvd0bfuaonoPNj+\/7eUMrvvJTFjEC6bcEfIL1SCP0\/cCXT\/0ng27vN+JL7LeTX2ISKZndM2O1cX7weAcJyEHJhMSqeawZccMTJKJ5yiG+R6Tt9MV7YaDTCeiG\/phNqj5D\/hAl5wzAMwzAM490cAJje3AFwsXQAYDUA8Nvr7\/PGh0b2Nr17pgEdjCEedtILAg6DeFbggYQY6Evou67ZvDsFoHAACEUPgG7\/KwsAGLfN66Wgnntt6A9UwE8u5zHEMtF7C5d3JIDEwScsyrO7hLI3RR5XmlP6zd6LJJwA3Qgx35n6v31+dPgMJ+f\/5f0T+kriUvvawtjIaD3B\/3ClcCuk92GdSK9mMduT+o9fGB3+AU7O\/wONwyfb1PmuaPpR1sj3CvmuTSiPQquwCd3Ioy52nN6OEWc8+WYATiXkO0zi+eFvnL+01cw\/HYXDFNwUbsrIw4S8YRiGYRiG8QQ7ACgAmzkAdnx+7iKAiwD+v\/UZ1vnLQ09T\/sByrueB+GIUXwJxSMILJJ6ukDuqHj5xRQYvlAGA0gGwEgDoqak2tit5Whxy3UPG96G\/Zb80Cb35scNVtRb\/N58waUlhq\/eJiqkSbkdKHwQsBy3l0hykBQG5IxyEvSSH+xLurJBuKUTkEWGzwAEBhgjXRIwVz587N7r785i8cmH9HPttOD9BMEt39SeNRudvo2gOuFJX3w1egBAFqjwOFKJY+t0Jd7uvnYBkMY\/RO\/7Y4h8cfh2T8xeT7ajl6E\/oKqQLEJpFs7tGFGba0AUIb0biVEK+5cTTic9mn951eX7TiMmvFEJ+agpuDFifkUcZAIh2yhuGYRiGYRjG2q05AWziAFgTAFjpAVAEAAKwMA9gHsAba+5wFMmlZM9QJ0v3Z8ChGOLhRDwcoJcI7ge1LyX7+hJ6B6JdNr+mvRb3TJRcStIByd121w96+MPhNQ7HSYTvbS396Z2pf\/lqHnNuYdGXEPoT+nZQWAr61xD+VfT84v5dsxd6NaSOwl381aeH20rf10T4uCc\/8VTK3dczxc0CCCRcR8h3pW5niOkPE\/gejcNtNDXj7kU+IajdWs6+L3X44GKQWNbRQ4iJg+86ZjIJnVLZVjx8SiIv+s4havOAxfrgRUcIe1L31JVO+IFB4IeTe40sVR24HDTVAn45Mp4GcKrj8\/PtZNfl9\/zSW+0tbuswWhz87gLTXZBMyBuGYRiGYRjGgwkAqJsxPAquJNqKn0VOIwcuzwCYAfDF3pu++bHD1VrnytOI6YFrii94uMMR+mjV8UPtCD3sLLIe8t+\/13nzBFpZ1FVBeR7vvLt+Iay4wwHJQxX6k4jHR5EI+P62JAhus1dGQhhMnW+F+Bt5xA\/sn5774mavaaEZL80CmAXwHy9\/eP9PLEE\/MZjwjy8FRWBTp4C\/kUc54o+d\/\/D+H+XkzLn1I+jupVY+k0BiyFE\/nhcPmBKiI9yO1PkbWVy+EfWrnvHXcunNRP4yANxQ2O3FrwLdEUKvPpW6yrVcRaL71u9ltxykSP6J2T84\/JPJPZ45se7oWzl+Znh69t+t\/eHlQsh354UOQZMAvjQJHSsWmYjpngM5bSuvYRiGYRiGYTw0MVoEAOJ6UXUM4NeMg+MAuvt6TEIsEnoXyn+\/AQCzR4a\/Unf8UDsogvdl7NsDE9kPi27X92fqA78wu7Q0Je\/u+HkwiLHqog\/hF+uJ+32NXOFhvB46CscJxAt+3\/sq0Nc1iqy229i5gDiY0Dey+KvtVvKtz33hfPP4KJKxIejYqobUTYK\/HHnO6ZlzAP7E3NjIWwMJjy1t8pwJMAj5zsT3XUP8VgA\/NzUKt0abbgO5ikCXhFD39LnUXg7x70XiH+8\/Pndmk5v9AoC\/M\/PqyMuNEP9av3d\/ql2MxZTDlg0GXStKVceDnYCPbItdn06DGkUyBSQXh5CtEfIbWB8mbC01DMMwDMMwjHf9CMBuAGDvAtIxIJ8jBh8VZa1XkJ7ce\/iB9gd4abCiqYVlN7j0dPjAG2\/c0\/z5Mohy8V7uY2ZsJHuYdoapKTgA0Qd8pL\/icC2PARuMjxOgigNbUZfk4n\/73BfONzWKhD1j7iY2C+KUFv6uU5xTcxOzR4a\/bjD133Ejixtb3gUKEqFXAfzc2ND2B4QIsBu4yCK+nBF\/av9n5\/4z0NMwvkyEF7EKYGoBLEpo5k4A+NPzR0Z+NSU+6Yg00y0y+kKsEj7L9do2Nd5j5DTy46Orze9MyBuGYRiGYRjGkxEAOD4Kchr57JFHp+R2bnD4X+7Nlt\/fCgp6QM0A51oIr6RMG4MXpgH8mW4m+yGUHBCAZh9yycJY+TFSX8ctHgqBMJC45GonfGr\/1ML8eoF\/m084aggUwIUYf6wV3Ldj89edmUCA7zmKomfA6mQ+bFNPBcSBhK4d9dvzIXz0a6cvzmkUybFpxC0bxhclNO6NV+CHj8\/9H+fGRpb7PSejFAO2bMjHACA6fCCx5ckwDMMwDMMwjMcvCsEX+jxfDGXB9YMgCOjzxFKuwo594t5E9t2WHJSz5DXzsF+D0gJPan8udceqb\/SAmUdBzn1OKJpC3g1uEqGIPF38nZk4\/JW650utgLhe7JOIueAgPfU9r+yrTbwx2yiPGbZrKkLFAVnU1asK394V+LcbuCAQ8QaivgcpPzn3ry+MjfzUrpQ\/eDXT5s34CIYIUHzWRL5hGIZhGIZhGHgMx8+1m0Exk4L0wOrRQzPAk2rbK7Da\/0\/grriFiFaZhUaGZQLS0N0HNwQ4TiOfO8Kwq+KTRiY4d\/PvVQhciu75kPoagMY2P+vYnzh\/JQs\/9J6pi2\/fjTMBAPBJ5ALcpU72o9eZ\/vGqw76ONm9qmRfej90m8g3DMAzDMAzDeBzlJVnMUxcfkF1fq3\/Lpgiuey1u9RsJASRhz1EUjfTuNbAQhZ+6noUDzaDIXGvuLwCoAohw7VD1DWxjo0YJsebpr2Xh7Wf27vknOjrvMLGFPR9bOzmOj8Ifmb68ODM28qn+xP1gZ5O+Br3H2kS+YRiGYRiGYRiGgfvTugEiscjVMoKN5teLIKLcxyeA\/2t8CMm9ljjsn5r75w\/pGce6o2sFvs7JE53jo0iO4C6y+CVjQ5AAzkn\/oRX1gwL8rSIgJvINwzAMwzAMwzCM7WccxCQAYcGTILVZtjxZzGPsd\/yOc0dG\/tCzk3P\/QaNIMIZ4t40LNQ5\/K0fAFFZHFm4jriPBM0wJ5cjJe2ESkYAWauErjTaXU4f+fAvLvol8wzAMwzAMwzDwmOaQo4QIIOLBzfWLKqzp0V4AoCuyRXzZAdqquV0s6vLZ5\/CvLo7t+wucmv35stM8p0bhx6YReQfHlZN3Z5HHPTbcc4BrBoUQk7MEpJe3590Xor\/hoMuerj\/XlofSRL5hGIZhGIZhGHgc68D7BxI6Ae4Bdtf3AwmxFNBnLwAw2c1iC59rRRGC20yaEmBHUgoM1BJ86tJrI9+JPP4kpxe+gJ5s+\/FRJGNDECahlTGOjxCOQB7RiPX2EgAc26bZ8iO\/Mt+cGRte9tii7sFEvmEYhmEYhmEYjzFv3MjVbkfl0oNpvAcg3gBSQr8FAHj50RKgD5rxSUQBfEfV31Bon6p7HmpFRWLj18MBzAUt5dKOlB9vePfx+VdHpkBMuug+u\/f4zFfW2+uPjxaadmwMERMrwv9ho5hzu90cIm7vPk3kG4ZhGIZhGIbx2LF\/au67H\/ZjuNt6cjw+Xfd0fBTJkekzrQtjQ\/9Lv09+uhkVNhP53Yw+CN4oZ8L3e44l5NiNGLPZsZEvi\/qCk\/ucS9xvDn\/mwskV0T\/dU4sPrNSyP4nHfVtEPiUK4JStJYZhGIZhGIaBJ3QgOucerdFxfBgKr6w9J\/BkZ\/G7jE0j6CgcTjz9c3MXL\/\/JHYn7+sWgnLfQomQh1pdyBUBwRFpP+L4K3fsi9D3LeWjPvzryZQlfBPC5PPI\/75+efbO3Fv\/4KJKxe2je90SL\/Ohch4COA9BROEyVkZkhCC9DpW0C9kY3DMMwDMMwjHcthWg+CuIEuNK5fAxxaqrI2s5QnUcp7sCHGvMwutl8AeTkic751\/Z\/VzvGX6877mkEBVcK+dsR+xFQI5eaVJRAR1Srjr+nQv4eQX\/uRq4wf2TkywvEcUf3C4t5+vlD02damAZeH4cffxl6UsT+PYv8CCBRPHD+tf17\/slnZ64emS47WG4yxmCqXAy6zRLKk89OAsMwDMMwDMN4RDLyAIhxsHfvzkkEAsDEur37NHD0KHA92b+nEcMBaytvbFS2oHF4Ts68efojQ394MHH\/fjDhrjKj73kbDpCujR+AIzcU\/b7q+LU1x69tRf2lAd8+eenVkX9N6VN7Jue\/tGLlfwJs\/Pck8kn4pWJI30\/5GP6nv3BkZOZ7gXOU3gTwdmQ8SfrzTde+8OJnrl7fbIyBikXEYaGw\/I+tdQBYAMAwDMMwDMMwtlvIlxn5qQVwDEUn9E8UQr7oWD558+2ufNOup9qhcsDBPRMR3wvgBYEv8XN4dlnhGZC7l3KtZF8No3ekXSH0F\/7TmSPDH4bwL55O3fuuZhERyHGbYn8r0d8MUjMqAnA1x5fqnn99KY9\/5eJrI\/8my\/F3OTn3RaBwnz\/OWf1kmywYTMinU8enE+J9nu5bJCCTw3Ku2B+rl2bHRmZBnI7Q2x76CuHPMGSnl5ld5PT1a9hijqHG4dcEAMwBYBiGYRiGYRh3lJEfA4DVjLxuysiXnPnQc7s88r1MdIgMz1Puq0EcknCoHbRP4J6ah0vpQQJBQi4gi0Buu3PjtoT+\/Je+\/I17PhRrlR9OiO\/vT1x9MY\/IY+EWEeF4h\/0dekU\/ALSiYtnJv7LDuz\/a9HH84pGR\/\/XMDf5NTsw2Hmehv23d9TNBWa4i6keJACQ4R7iEGEoch1Li\/a4s129HoakkVJFcmhmrXSBxmuJJkKcU4ls+9ReUZzPD0xeX7sgBYAEAwzAMwzAM4wkX8j2W5A0z8vOjewcylz5TZdgf5F6KUS+AeC+p56TOAQJ76p6+6pKyRFfIBOSlkF\/OFUlFFQ+ieAwE71SYGU+o0D8Kx4nLiwB+cOYjI\/+UiN9H4Lt2pu7pXEIjqMjuC8RdCP5S9LtS8OtaFiMJtyd1\/\/3zO+I3vv1f7RvnxOxZFWPto4n8W0dOeu38iIA6AjplAICUSvXtHOFTcjh1HE6Ir\/ckgoTMOzRDzOT8pZmxkXOOOB2F05F6U8CZJMdp5+JFTl9cwm0GAC4OQV+ahI5ZAMAwDMMwDMN4lwn5YwCP3YWQV8IhRR4E8LzE9wB4gdSLAXzGIT6dOpf0EfB0yCUEEVksMvONoNgoMqFQj5Av9\/kOhUAyWW\/cXY1+qdc4OfdlAH\/59OjenwD0HUH8LhLfsMu7NIfQCkKmou8bBd5Flp\/dBn+Xs5jtSPgNJI5f+KZ9R\/iZx1PoJw+gmyLLT9jzPQDdAIDQybHiAOhGAh2RVhz3JcS+lPyG7gyKVhRaibIANz9zZOQ8gHconQzEaUZ30iGeb6E2x+kzrY0CABMAjgLu2HjREdQCAIZhGIZhGMajkpGfHAf39gj5Y5NQKUA0sYGQPz36fM0lzf11+Wc6ii954ZDIlwAcDNIBRg5VHdOa48pMt0wqrfVCI1dcvw9fL+S7yTvD2O6u+5jsjtcDOXlxDsDPAvjZi6P7vmoZ+mYpfrOAD\/Q5t7fq6DIJrSjkEQGEIDiyfN\/e3t9Mr+fKdyZ8Ic\/1b2f\/4PBHJnfOtzQJPk46MHnIL+xNAYDuZxFQOwodIYLqPeDOA2ni3IGUOOCJD3o6BAntCLQjmlW1Ls2MjZwDdZrA25R7k8xPd2LlrNq8\/NwXzjc3WiQnygV2ahR+DEA3ADA+WUR2LABgGIZhGIZh3KOQx+Q4XFfIT6GYI75VRv7sBw\/U+6ra00Y86KGDot4D8gUBLwCtA4zcmzrU+r1D1xkbBGRlVr4dFdtFM7LicQhunZBfm4kzjAec1UevDptG4PTs7wL4XQA\/c\/21\/Xua0tdnuUYj9JEI\/J7BhIMJibaEZhBUWPvdmvfzJjgguZ4rezp1X38xCz\/yiUn81bLrfjCR\/+ACADd15gyAYpQ6QqH+y8gjCTqynjg+mxLPJnTfyHKeXzN4eJe3UOfc7JHh8xBOi3zTIb4t8u2Q+dlnGjNzfAMZppFvuDCXUSYsgOiZAGABAMMwDMMwDGONtf4osH7fuNLkawMx8Tsvo7LvwP7hRifsd9SLlDss6CUSh4D8mQ40UnWu1uccuhn5XEImIpfQjIrNsJqRL230VJGEX8nIW1beeKQz+6UO01E4TMFhDJETM5cB\/Er5D5de3f3MYqj8fkhH6PBhAe\/blbqkFYRGKMpLbkPsJ1ezGBPw++deG\/pZTi6cepxs+8m79A3QtRJhfQ1AEBRUBABQ1v+XC6H3ZC0lD6bkQUd8yJPIItER0Eni0tzgyMLcEZ2D+LbIt0SdJHTWhXh2aGjvFU6c6GyxoDuMlm8mCwAYhmEYhmE89hn57gg6lLPkMY24Yq2fuPl2b37scHXn8rXdwfvn4PgcI18S43tQWOyfa3fi3j7v+isOSNdk5Itmd50oZVGh54FwjZDnzRl50\/PGuzi7HzG92mttagEcm0bgr165AODflP947sje913P8G2E\/uhTqXs5i0AzKGw1xpEAAxB2pa56PcMfA\/CjGIXDtIn8Rz4A0LuwsScA0BJEQoK6i6NLiIHEcSAhX0jJ0cIvBSwHIHd+afbSlbmZIyNnIJ0icdKJp3LH02mWzf7sr12aZ\/Em3PBN8fo4fG9tVTcAYOLfMAzDMAzj3TFLvreX08rkpw1G0Gkc\/tLVPcOKlZEAvYioQyBfEnAYraVnc5+MpA79fZ5wngA8snIEXS6hHaV2KMpVVxrelTXH5T43Wa\/gTcgbT0Lt\/voG61ML4JFp5M8ev\/hbAH7rd15++Sfd0KVxOve3nkrdV10vO+pvcYIzi1KUPgbgRzFtdv3HJwBQfp4LyiVBa0YAkoRPiIGEPJw6HPZwrzkCWRRaEch9cv0vjA3PfS9whsApiW8L8S14fxYBZ\/\/fodmrn9iivqNrRZlCOQJwNQBQvocNwzAMwzCM+7U9FLCSkV\/pXD+GyImyc\/0mQn5xdmT3UsrnRDybSIfzqMOOeGH2Eg8BGEqJHQOOSBOHqGKWfKauxR66nimuTJ1aL+R7MpBmrTfwOLlfttZqt6V\/1ol+6ig4NQX3tdMnOjiBn\/\/yN+75hadr6U8PJu7PLOZx84w+4dpRJPDe86\/t38PPzlwuXTEykf+YBgB6F9VuAKAVVkcAdsc3JA5PpXRPJcR7E0dIQACxnAtyuvbhi8Mzs0dwFsApUichnFLkqQg398z07KUVK8pGJ8M4\/JQ5AAzDMAzDMLY9Iz9WZuQJ3JyRny4+zHxoZK+rxH2IOBTpXiB0GMCLcxfxnFI846Ed\/Z5wcCCBvBw9l0nIJGX5Fhn5UnjYCDrjicnG36fTm8X5GwFQo\/CcvrwI4M\/OHdn31I6U33Ej29i6T4C5AJK7QwwjAC7jKLhRYM9E\/hPkAGA3ABCl7uiRtQ4A7kwcd6YOLzsQLB0ADQhO8fLM2MgciHcgnCL4lpPejE7narF2Ydf0mWvcwgHw+jj8eM9FygIAhmEYhmGYkL\/DjDzAsx96bmfFt58B8XyUe4nUi4ReIPi8oBHC7aknRFomcyKK8XNZWS9fCAjLyBvGZrz5scPVl\/JYO4Wr2LXBz68C2IVd2JW4Fn\/prfY9Cf5p5MdHkYxNI8y78Nea0X2Lc6hGQdwgnCZAVUeGnMVDO\/F4hNxM5G9HAIBr3wzdRTwTlEWp2eMA6I52SBz3pOSexOFrfNEgALmApRyxxdbV2bGR8wLOkXpL4JsST0E4k4d0\/vnPn926BGBjBwCOATi2LghgQQHDMAzDMN4N9t5jRdd6oKdr\/dTajLw2y8hf+5bndi0vZcOEDkbqRV\/UyL84JzxXQfsZkbsHPelJsGx4l8fVhndLuSJYdO1Wzyx5okjsWEbeMDY4h0eRcBr5YGfxz7e8+5FaXslbG+jPPiCv+mYy29GPA\/i7x0eRHNlk2tntcGQauQCOfHbh1IWxkf8ykPAblnPF9ZptjSZyco\/TsTeR\/wADAL2LfzcAgLDqAIBAR3hP7kkd9yTE+33ZK6ItoRGkCjsLM2Mjc6ROSzzpyLfyyFNVh3Not2f2\/vrlxa0cABObX0C5ctEEsNIltmSq\/Dg2tHrxnAQwbgEEwzAMwzAhvoEQnzwBjvfuJcq9xdj6O+nuLco9Rbcmd4N9hCY22syUXPrY7h3tZnU\/hGe90wuiXgJwWOKhxnJnhA57+zxZdQ4QELAq5IOAxXxdRn6tkF8ZQWcZecO4Y\/orzu1yEJINzp8goOIcXAz9QhG8u2eOgpoAFoAZzyev15mJ\/EfIAYBi5oqigCxfLQEo35bOFQ6A4cRhOCHf70lECbmE5aAclfTK7JHhcxF4x5MnQ4hve+K0l78QXZ55VluVSt7J83bnerajfXDoTNYTENBmF83bZWLziz8xXljnen82ti6I0BtAwMvl5xZAMAzDMIz7lxEH1thTV5yAPQH+NdfuIQiTEFCUCN6pEL+jxz0Oj4Xn06vpjWqblWoa0jSoXQvBVyLjMwn8QTgdlvQSgIOdNg84p919nklCwtEVGXmhFPNCI1dsbJCRL8W7ZeQN4z4QhUY7RgnIM22oP\/OOlMSIgwR0fDv+aFnGPEsMSFtrsiAhxnBjjQYxkW\/ch\/p\/bBQAEKCOhE6O1QBAeYFyRJI4DKXODSXEKw6EvEMrCu0oCD6GmDc7bXWAaqvq2q25i8Od2SNoAmxJaBBYEtF0wBKERiSaLmIxejQRseQclqPQcORilNqIaOSKbSJt1RM2Op28s28nl0\/m\/eGlwbfyFetc0QFzWwMIa+bT9mxQejcn5kAwDMMwnpSM+FTvtW41UH5XGfE7FeInFw8nLyXLfvaa+oP3VQj1FFktwtXgURdYIzQAoB9CH4hBAHUAAxD6HIvPJdQFDIDod1B17iLqcu0qQrVKqNZRXgF93Xm4uvOoukKfR5TN7sqmd8u54vp9UpmRh2XkDeMBUq5Jgs7kAiF4csO6eN+KoqBXNf5yBS+fyDV9913uu0nG+dG9\/TnwvnYUsMEoPQFKCGbCYgrMbTYW00S+cd9jAFwfACg\/i4A6Ajq5RCJ2r2rlhcw5wDmHfoL9BOFKK4Fb6Sq4Onx1xZtW+lokQF6rnwOIIDoUICcizzpiBynyuSW1B7DYnmsNN2ePYFliG0TDCQ0BLRI3IDQisOyApQg0E+h6Lrad5zIjGgFqgVwiYgsJGonydtZKs8pAp9241pd94dnzna3m026bA+EoOHkC3Ltw82I0Zg4EwzAME+JbZMR7y96mNrivi0PQ+APKiL8+Dv\/BcwcqfTsbaWepUk1rWZozqSJHnyLrIPo9WJNDH6B+INZidDtA9DuiLwqDEOqkdhCsRqAPQB8LId4\/iMX6AlhFiqpHSAhVIlyaEkxdsbPu3VtsuM\/A2n2GQMTunqP7Pa5+3oqKrai43lqPVSFvA+SNx2PNGYWfuovbvrEEHh+AbvcsaCtPjo8i6bndbTMGANMryb1VijUOPudvNxDbjqxG3NwAj4BrB4WdqX\/+\/MVL3\/fsBH7md8ZRwSQ6d3XgxpFyEp2zcH96T8Kh65t014egiifzXKeHpi8uPE57dRP5j6cDwK0\/m7tlAKtxq\/JqWr6ZtSaSoLVfY8XStvp1UZ9GB5BghUSlCBRwpXCNRHlhx0pQYaNrLsuLdpAQWIwgDBKCCGQIGdIWUnWyVqWZ1PP2hy8Nt2fH0BTZIbAIoUGiIWCJQpPUYgBbEJZBLgFqusjF4NAA0aTQYIxt52KzEytth9jaP4gG6rtyTJ7Iic278G5TAMGtz8yYA8EwDOPRy4j3rrsr14b7lRE\/CnfyNw6ng2ExiR1Xj3C1iutUFdgXva8kRJ+Eeh7QT68BgHVIA4VAVy2IO0DUHdAfhX4SdQk7HJXqEuqq57WsVakgVT3L0wqBGgifeMCXu19PwNPB0a3ZGGjtnnhVfKPbbb7YSLgVoU5ElP2Hculu9xk9GwZusOdxK\/sdE\/LG4zx27h4a0AHA7Biy2xhQrxf2jF56cXIybPPjL3Lovzb\/zszY8G8PJHylUTTA8xvNrF\/OY+x37ifOjQ7\/1rOT81MaL0toJotl5nbW0Tc+Dc9JdM4d2fv+OvhjjYC4URa\/\/JuxSrLJ+HkC8V4b\/pnINx5eEKD3W8SmgW5uaCG4+eexe8L1BBAodJvWrAkgkGsrYtZf4Iubrgnwg4T3LB0Ijru62YCtHAgOvZH\/wtOwmhkA2lHIHRXlOt6FDFA2t8w2li53dGS4MSM0ALQILAFskaXzQGiIWBTQVOSSR1iKcC0HLpFoBqoJcJmILYFLmc+yJKt0luvtTu1aX\/bsF863y01i3I4N4VY9ECbHCwfC2K3qKns3sat3qgc429QwDBPiWNMAFjcHQbdyUz3IjLiOwp37jweqfTsbabtZrVTSpJKFLCU0ILgaoH5E9DmwFqEBh1gD\/EB0GoDQB2CwK8QB9AuqSegHUZ\/9HOqDWOwHmNLFqofSKJfKs5JQLKzpAH0ZUC\/2xCvXw3g7GfHu93sy4kFALgkqj90GAnzNMdBqyXp5zV4ryjfpP3S3+wzDeELXSEcgnjuy9\/07nP9EIyqPwh11f3fdfTp1qB0J8eYkYLmXB4D+uUuf+8nZseEGAMY7fLg171xg9s+HPnPp5FHATazcLTA1Cn9kGvkc+S8qjh9Y7jYc32C9yIr9fF\/d89NzY\/u+l5OzP9\/9+fHRQreucdD2BmunETiBCCDOvDbysQrwzxz4VDMous266guuLVHi6xvdt4l8w4IHG5cVbHmh5q3vTLEU6wBAaSV4sN6BQHbtCZtnBrAaOCABOrJKospyD8LSUrgSQFhxInCTx5yUG6RiTm4AkUuIIhyQVfIkA2NroFVpoZ6358aGm7NEG2BbwhKAJoAlEssCGh5aDGDbMS5G+QaohotxMcC3aj7caEffIWKLTs1ElXaLseVdaI1cOdDBG2\/kPZvbe+6BsNnmdqPN99gWDoT1AYRjWOtAIJ68bqeG8W5a4rVFRhwAxu80Iw5gZWb5RtutiW0KILzySrIwcLaaI6lV4WrBdaoxurqcq1ZdqLSC3wGhTq8BJ\/aBoS\/KDXqoKnAwdmvHgQEAdRIDgKpz06gm9bzeaVWqjrGWh07NganA1FNISHiPMivuepJH3CQjzjXiO64R56VAL4S4lvOVS562yohvKMR7rrG9Ypyr1+ybpwFtWTe4gSvPzhfD2DamRuEwjZgg\/fodVf4N19m4K\/3tsBQiOsWisOHWu0i1sz6Y8K868Pb9\/VjtjN+fEhda7jcBnDw2Dk707EPHphEE8Fya\/PPrWf7Xq8TTbSGW2+z1gQl2opQ69NcTfmr21ZFPAPrpkT3zn+PkrTPsC6\/u+3pAP+CA7waIViHwNwyOSAgDCd1irt\/cPzX3a0ePwnECASbyDeMB9SDYJHhwN5mB3oKFsM6BsFkJw904EACkzjF1QJ9bybjcugcCAES5FQdCdL7c6HmkFDJRiGh3kGc+qoPIztyO8xnGhpdmgRaIBoQGyCakZZLNCCwDWnJkQ1GLUa7pXViGsBzgWxCWCbXg0YCwnOR5p1OpdKrNdmcpHcgOjp3pcAKxjI7iQToQNnIh3IkDwTCe2PjrbWTE159n6zPi5cf7lhF\/Z+r5SlZfrPRltbSSdCpJJ6m0iH4E9HmwlhP9HqEGoj\/A9zvFusgdhOoCByAMEKgJGCBUA9EHoW+OqAPn+wVfoWKlQ1Ugl8KxklL09BhIuqVk3fU5WUlx6Q4y4t2PZfdotO8lI15eF3SzNR1YTd7fOmC+hRA3MW4Y7y4i1F7OlC\/lChta3G8v8Ol5i1NfAG7kyu9qKyXEHHTOuc4ma5Q0Dv\/c5PkrM0f2\/dBAwn\/cyWIGbCy+HcFcUJ5LO1J+Wyfy2xYuj\/zO7Bj+E6DfEjkrcRnM5cEaIoYi3fs88fsj9Pt2eMdreYQgbSbwVxOEoJf7mwSiTsBPwEboGcZj6UDYKoCAO3QgFDN4782BsC4LU\/RAIGsEaiTLDSrXOg9WHAju5k2l7\/6NBLmEACAv5wOHYmOah8TnPoRGVknbVbRbs9MjzZkxdRzRiGCTQgPUIsAmpCWQDQFNp7gYiAaAZQjL3qEBh8UQfYdOTafYTlRpJwma59vtztfgYotl3dP9dCAYBp5Ep+fE9jV8WsDeWrVareQ56jk71ShXg1h3LlRC9IOI6PMu9JWd0uuRbpBAHVKfyKJhW9ExvY9QPQJ9M9OoVtmuV9uVKhWqIfq+UNijEu9BT6BKwMMjKXdigL95TUOZEV9XGx7XiPXVjHi3RnyjYK5lxA3DeARXcxJIVCwZ\/i73vPdVFwplVl6b\/ylOImgcnpOznzw\/OvKHnq66P3KlEzMS6Vajxm9kCiBc3fFrqym\/lkCxfxUgJEgI+KRYdDsSGkG4lsVAbh3YiEA2lLp0PgufPDA9\/5nisT0+WXwT+YbxLnAgcF0DxTURgWIHurI73WjTyk0ituvGCtEVv5qSTB1RZ8+codX6z95dbG+n5MKBEKGbMlw5hCwgCux0kGdZpvZu57M5DXdmx7AMoCVgmWATRAPQssQ2gRsgGhSXhbhE5xpO8UaU2oG+mQjLjmhlQQ1STYfYarernbprZld37OrY29B4srhSrV3rS6rVdqUZXb1C1kD0C6zBoc8LdSHW6NygYuwj3ECEBsrs9yCgGsm+wqKuuoCBGaLmhD6RlWaWpQKrFFMA1QpFDw96wHnA0Zed0ArHkjbNiHPl87hBRpxYacSqjlbHxW62jvEOMuLra8RvR1xbRtwwDGN7ODZZLPOXm50\/ed1Vpnam7vdey2NGbCz0u725AKAZNpymAaocldn9fpH\/8rcISmS7U5deyeLUM9XBv\/z6+LzH5Pa4VU3kG4axvT0Q7jAjtFEXpN4mihs5ELCmDvQ2HQhl3ssBbsWBAA72OhB6SxiKz9c6EFRm8FB+7PZAyAWEYlZBBJBHupDWskaOtD3QXmrYu8V4sqj0s5ZVIl1f1cFLSLyD8wAS160RL88j72+yLmlN13TeVBseezLiEtARhMKafkcZ8TXf5ubmqPVifKvslGXEDcMwHn0mgHgMcE\/\/5pUbb7869F+7gH+3J3UfvNyJodzLbmWt33iaxh0s+hIiifh06tJrmaZcO\/s2Hn+rrZW4sIl8wzCekAkMvMWiebcOhK0DCLdVx7rqQCAcwQoI9DoQDONJInY7pndbjHRHk0Lq5GV9\/S36i2wmxDfqnN7TUuSOM+KGYRjGE7vXjAIcf3Vh\/sIr+167sSP+zGDCP5cLaAQF3kLs4y7LCQDEqmdSc3DX8vi\/n73BH\/jAG5cb3SkGj+OxToTHYxagYRh4N42G2VQN6BZfd92+PT9bCRiEsiOCjfwznsyRdGtT3+vmjG95Umj13Lrp1BNufZ4ahmFs13JWZlZNn5TrcqnVgh7dpTeqqNbSHQn9N2YbAP78\/JGRX0wdf3R36l5uR2E5SCQCBIe1vanv5D0kAjEKrubp+j3dch5PLWb84ZGpuZ8HgKP3JvDDFq\/L\/X4Pd\/92cdw3+dvJ7tRZNt8wDMMwDMMwjIeeBKgQmG\/HvS7csbh7HPvu1fpTJoQSz0dX4dcTotVS5Q4z+sQ4HCfn\/s3ZDx74xdCff3eM+N7+hO+rOSbtKLSiEIrGLvEmVxk3aGpdNKl2NUfWHF2A0Ax6eynHP10MzX94aPr6tdfH4ccnEe8lg09q12DqE8+bXxcBSAhc7Wi3S3QfzKXaszP1SdVpZSpM79\/2xd\/ek1zpxL9lS4phGIZhGIZhGA8TB8pRzjkuRb+zCVx\/Io\/D1BgipgEfw29ebfFoMzInxEc0EKFGjJ4IXwIAvI54O+EZFlOVyq7755sA\/qGAn7v4TSMfyXL8kSCNAXhPzbE\/LXrNrKTMu5+7npIxRyCLQCsqawa905Y+78Ff6PTxl5\/59GwDAO61i\/6xcpQs5X76cju82N7gdXGgQLkY0ao0\/bXe2+Huyxy0OmLQ\/cjldhhui2Gj94QjGCNatOXEMAzDMAzDMAzDeFglZ1Oj8Eem11jcOT+690Xvk69rx\/DVDu4QoP10GIhilZAn0ZDQhDDviNOSO4kk\/JdmVj95aPpMa+X+R5FgGuFJKuf8\/wE2siFEy3Mo1AAAAABJRU5ErkJggg==';
+const app = document.getElementById('app');
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtN = n => Math.round(Number(n) || 0).toLocaleString('en-US');
+const money = n => 'NT$' + fmtN(n);
+const kmoney = n => Math.abs(n) >= 10000 ? (n / 1000).toFixed(Math.abs(n) >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : fmtN(n);
+const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : 0;
+const pad = n => String(n).padStart(2, '0');
+const WD = '日一二三四五六';
+const dKey = ms => { const d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+const md = s => { const [, m, d] = String(s).split('-').map(Number); return m + '/' + d; };
+const fmtT = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const fmtDT = ms => { const d = new Date(ms); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + fmtT(ms); };
+const fmtSize = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('ish3_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('ish3_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('ish3_' + k); } catch (e) {} },
+};
+const deviceName = () => {
+  const ua = navigator.userAgent;
+  const t = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : '其他';
+  let id = store.get('dev'); if (!id) { id = Math.random().toString(36).slice(2, 6); store.set('dev', id); }
+  return t + '·' + id;
+};
+const logoHTML = (st, h = 18) => `<img class="logo" style="--lh:${h}px" src="${esc((st && st.logo) || LOGO)}" alt="${esc((st && st.appName) || '-ish')}">`;
+const setAccent = c => { if (/^#[0-9a-f]{6}$/i.test(c || '')) document.documentElement.style.setProperty('--ac', c); };
+const I = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square">${d}</svg>`;
+const ICON = {
+  sell: I('<rect x="3.5" y="3.5" width="7" height="7"/><rect x="13.5" y="3.5" width="7" height="7"/><rect x="3.5" y="13.5" width="7" height="7"/><rect x="13.5" y="13.5" width="7" height="7"/>'),
+  book: I('<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h7"/>'),
+  chart: I('<path d="M5 20V11M12 20V4M19 20v-6M3 20.5h18"/>'),
+  box: I('<path d="M3 7.5l9-4.5 9 4.5v9l-9 4.5-9-4.5z"/><path d="M3 7.5l9 4.5 9-4.5M12 12v9"/>'),
+  user: I('<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>'),
+};
+
+let lbN = 0;
+const busy = on => { lbN += on ? 1 : -1; document.getElementById('lb').classList.toggle('on', lbN > 0); };
+let onErrCode = () => false;
+let ID_TOKEN = '';
+async function remoteCall(name, args) {
+  let r, j;
+  try {
+    r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn: name, args, idToken: ID_TOKEN || undefined }) });
+  } catch (e) { throw new Error('網路連線失敗，請確認網路後再試一次'); }
+  if (!r.ok) throw new Error('伺服器暫時沒有回應（' + r.status + '），請稍後再試');
+  try { j = await r.json(); } catch (e) { throw new Error('伺服器回應格式錯誤，請確認網站設定的資料接口網址'); }
+  if (!j.ok) throw new Error(j.error || '發生錯誤');
+  return j.data;
+}
+function api(name, ...args) {
+  busy(true);
+  const p = REMOTE ? remoteCall(name, args) : Demo.call(name, args);
+  return p.finally(() => busy(false)).catch(e => { if (onErrCode(e.message)) e.handled = true; throw e; });
+}
+const isNetErr = e => !navigator.onLine || /network|網路|failed to fetch|timeout|timed out|disconnected/i.test(e && e.message || '');
+let toastT;
+function toast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  clearTimeout(toastT); toastT = setTimeout(() => t.className = '', type === 'err' ? 4200 : 2400);
+}
+function modal({ title, body, foot = '', wide = false }) {
+  const ov = document.createElement('div');
+  ov.className = 'ov';
+  ov.innerHTML = `<div class="dlg ${wide ? 'wide' : ''}" role="dialog" aria-modal="true"><div class="dlg-h"><h3>${esc(title)}</h3><button class="x" data-close aria-label="關閉">×</button></div><div class="dlg-b">${body}</div>${foot ? `<div class="dlg-f">${foot}</div>` : ''}</div>`;
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); ov.onclose && ov.onclose(); };
+  const onKey = e => { if (e.key === 'Escape' && [...document.querySelectorAll('.ov')].pop() === ov) close(); };
+  ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-close]')) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
+  ov.close = close;
+  return ov;
+}
+function confirmBox(title, msg, ok = '確定', danger = false) {
+  return new Promise(res => {
+    let done = false;
+    const m = modal({ title, body: `<p style="margin:0;color:var(--ink2)">${esc(msg)}</p>`,
+      foot: `<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn ${danger ? 'danger' : 'pri'}" data-ok>${esc(ok)}</button>` });
+    m.onclose = () => { if (!done) res(false); };
+    $('[data-ok]', m).onclick = () => { done = true; m.close(); res(true); };
+  });
+}
+const centerScreen = html => { app.innerHTML = `<div class="center"><div style="width:min(440px,100%)">${html}</div></div>`; };
+function errorScreen(e, title = '暫時連不上') {
+  centerScreen(`${logoHTML(store.get('lastSettings'), 22)}<h2 style="font-size:30px;margin:40px 0 10px">${esc(title)}</h2><p class="muted" style="margin:0 0 24px">${e && e.message ? esc(e.message) : e}</p><button class="btn pri" onclick="location.reload()">重新整理</button>`);
+}
+
+/* 圖片：品項置中裁正方形、Logo 保留比例；壓到 45KB 以下（存在試算表儲存格） */
+function processImage(file, square = true) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onerror = () => rej(new Error('讀不到圖片'));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => rej(new Error('這個格式無法讀取，請用 JPG 或 PNG'));
+      img.onload = () => {
+        for (const size of [600, 480, 400, 320, 240]) {
+          const s = Math.min(img.width, img.height), k = size / Math.max(img.width, img.height);
+          const w = square ? size : Math.round(img.width * k), h = square ? size : Math.round(img.height * k);
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const g = c.getContext('2d');
+          if (square) { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, w, h); }
+          else g.drawImage(img, 0, 0, w, h);
+          if (!square) { const d = c.toDataURL('image/png'); if (d.length < 45000) return res(d); continue; }
+          for (const q of [0.86, 0.78, 0.7, 0.6]) { const d = c.toDataURL('image/jpeg', q); if (d.length < 45000) return res(d); }
+        }
+        rej(new Error('圖片壓縮失敗，請換一張'));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+const thumbHTML = (p, cls = 'thumb') => `<div class="${cls}">${p.image ? `<img src="${esc(p.image)}" alt="">` : `<span class="ini">${esc((p.name || '?').trim().charAt(0))}</span>`}</div>`;
+const stockTotal = (stock, pid) => Object.values(stock[pid] || {}).reduce((a, b) => a + b, 0);
+const pname = p => p.name + (p.spec ? '／' + p.spec : '');
+
+/*PRICE*/
+function priceCart_(lines, bundles, setsReq) {
+  const units = [];
+  lines.forEach(function (l, i) { for (let k = 0; k < l.qty; k++) units.push({ i: i, pid: l.productId, price: Number(l.price) || 0, net: Number(l.price) || 0, used: false }); });
+  const applied = [];
+  bundles.forEach(function (b) {
+    const ids = b.productIds || [];
+    const elig = units.filter(function (u) { return !u.used && (!ids.length || ids.indexOf(u.pid) >= 0); })
+      .sort(function (x, y) { return y.price - x.price; });
+    const max = Math.floor(elig.length / b.size);
+    if (!max) return;
+    const want = setsReq && setsReq[b.id] !== undefined && setsReq[b.id] !== null ? Math.floor(Number(setsReq[b.id]) || 0) : max;
+    const n = Math.max(0, Math.min(max, want));
+    let done = 0, saving = 0;
+    for (let s = 0; s < n; s++) {
+      const grp = elig.slice(s * b.size, (s + 1) * b.size);
+      const sum = grp.reduce(function (a, u) { return a + u.price; }, 0);
+      if (sum <= b.price) continue;
+      grp.forEach(function (u) { u.used = true; u.net = b.price * u.price / sum; });
+      saving += sum - b.price; done++;
+    }
+    applied.push({ id: b.id, name: b.name, size: b.size, price: b.price, sets: done, max: max, saving: Math.round(saving) });
+  });
+  const out = lines.map(function (l) { const o = {}; Object.keys(l).forEach(function (k) { o[k] = l[k]; }); o.net = 0; return o; });
+  units.forEach(function (u) { out[u.i].net += u.net; });
+  const subtotal = lines.reduce(function (a, l) { return a + l.qty * (Number(l.price) || 0); }, 0);
+  const total = Math.round(units.reduce(function (a, u) { return a + u.net; }, 0));
+  out.forEach(function (l) { l.net = Math.round(l.net); });
+  const drift = total - out.reduce(function (a, l) { return a + l.net; }, 0);
+  if (drift && out.length) out.reduce(function (m, l) { return l.net > m.net ? l : m; }, out[0]).net += drift;
+  return { lines: out, applied: applied, subtotal: subtotal, total: total, discount: subtotal - total };
+}
+/*/PRICE*/
+
+/* ============================================================
+ * PDF 檢視（pdf.js）
+ * ============================================================ */
+const PDFJS = 'https:\/\/cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let pdfLib; const pdfCache = {};
+function loadPdfJs() {
+  if (pdfLib) return Promise.resolve(pdfLib);
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = PDFJS + 'pdf.min.js';
+    s.onload = () => { pdfLib = window.pdfjsLib; pdfLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; res(pdfLib); };
+    s.onerror = () => rej(new Error('PDF 閱讀器載入失敗，請檢查網路'));
+    document.head.appendChild(s);
+  });
+}
+async function openViewer(mat, who) {
+  const v = document.createElement('div');
+  v.className = 'viewer';
+  v.innerHTML = `<div class="v-top"><button class="btn sm line" data-x>← 返回</button><b>${esc(mat.name)}</b><span class="lab" data-pc></span></div><div class="v-body"><div style="padding:60px 0"><div class="spin"></div></div></div>`;
+  document.body.appendChild(v);
+  const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
+  let io;
+  const close = () => { io && io.disconnect(); v.remove(); document.body.style.overflow = prev; document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  $('[data-x]', v).onclick = close;
+  try {
+    const lib = await loadPdfJs();
+    let doc = pdfCache[mat.id];
+    if (!doc) {
+      const b64 = await api('apiMaterialData', who, mat.id);
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      doc = await lib.getDocument({ data: bytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true, standardFontDataUrl: PDFJS + 'standard_fonts/' }).promise;
+      pdfCache[mat.id] = doc;
+    }
+    if (!document.body.contains(v)) return;
+    const body = $('.v-body', v); body.innerHTML = '';
+    $('[data-pc]', v).textContent = doc.numPages + ' 頁';
+    const vp0 = (await doc.getPage(1)).getViewport({ scale: 1 });
+    for (let i = 1; i <= doc.numPages; i++) {
+      const d = document.createElement('div'); d.className = 'pg'; d.dataset.p = i;
+      d.style.aspectRatio = vp0.width + '/' + vp0.height;
+      d.innerHTML = `<span class="pn">${i} / ${doc.numPages}</span>`;
+      body.appendChild(d);
+    }
+    const render = async d => {
+      if (d.dataset.done) return; d.dataset.done = 1;
+      const page = await doc.getPage(+d.dataset.p);
+      const vp1 = page.getViewport({ scale: 1 });
+      d.style.aspectRatio = vp1.width + '/' + vp1.height;
+      const vp = page.getViewport({ scale: Math.min(3, (d.clientWidth * Math.min(2, window.devicePixelRatio || 1)) / vp1.width) });
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      d.prepend(c);
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    };
+    io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && render(e.target)), { root: body, rootMargin: '600px 0px' });
+    $$('.pg', body).forEach(d => io.observe(d));
+  } catch (e) {
+    $('.v-body', v).innerHTML = `<div class="empty" style="margin:20px">${esc(e.message)}</div>`;
+  }
+}
+
+/* ============================================================
+ * 手機畫面零件（後台的即時預覽也用同一套）
+ * ============================================================ */
+const unitOf = (st, p) => (p && p.unit) || st.unit || '件';
+function headerHTML(st, name) {
+  return `<header class="m-h">${logoHTML(st, 14)}<span class="sp"></span><button class="who" id="who" aria-label="我的設定">${esc(name)}<i>${esc(name.charAt(0))}</i></button></header>`;
+}
+function heroHTML({ st, sess, sold, target, locName, today, next }) {
+  const d = new Date(today ? today + 'T12:00:00' : Date.now());
+  const p = pct(sold, target);
+  return `<section class="hero">
+    <div class="top"><span class="lab">今天 · ${d.getMonth() + 1}/${d.getDate()}（${WD[d.getDay()]}）</span>${sess ? '<span class="tag ok">進行中</span>' : '<span class="tag">一般銷售</span>'}</div>
+    <h1>${esc(sess ? sess.name : (st.eventName || st.appName || '-ish'))}</h1>
+    <div class="sub">${esc([sess ? st.eventName : '', sess && st.autoSession ? sess.start + '–' + sess.end : '', locName ? '從「' + locName + '」出貨' : ''].filter(Boolean).join(' · '))}</div>
+    ${next ? `<div class="sub" style="margin-top:4px">下一場 ${esc(next.start)} · ${esc(next.name)}</div>` : ''}
+    ${st.announcement ? `<div class="ann">${esc(st.announcement)}</div>` : ''}
+    <div class="prog"><div class="nums"><span class="big n">${fmtN(sold)}</span><span class="muted n">${target ? '/ ' + fmtN(target) + ' ' : ''}${esc(st.unit)}</span>${target ? `<span class="pc n">${p}%</span>` : ''}</div>${target ? `<div class="bar thick"><i style="width:${Math.min(100, p)}%"></i></div>` : ''}</div>
+  </section>`;
+}
+function statsHTML({ st, t }) {
+  return `<div class="stats">
+    <div class="stat"><span class="lab">今日售出</span><b class="n">${fmtN(t.units)}<small> ${esc(st.unit)}</small></b></div>
+    <div class="stat"><span class="lab">今日營收</span><b class="n"><small>NT$</small>${kmoney(t.revenue)}</b></div>
+    <div class="stat"><span class="lab">${st.allowPreorder ? '預購登記' : '我的訂單'}</span><b class="n">${fmtN(st.allowPreorder ? t.pre : t.myOrders)}</b></div>
+  </div>`;
+}
+function tileHTML(p, { st, qty, stock }) {
+  const low = st.lowStock || 0, safety = p.safety === '' ? low : p.safety;
+  const tag = !st.show.stock ? '' : stock <= 0 ? (st.allowPreorder ? '<span class="tag amb">可預購</span>' : '<span class="tag red">缺貨</span>')
+    : `<span class="tag ${stock <= safety ? 'amb' : 'plain'} n">存 ${fmtN(stock)}</span>`;
+  return `<div class="tw ${qty ? 'in' : ''}" data-w="${esc(p.id)}">
+    <button class="tile" data-add="${esc(p.id)}">${thumbHTML(p, 'ph')}
+      <div class="t-b"><div class="t-n">${esc(p.name)}</div><div class="t-s">${esc(p.spec)}</div>
+      <div class="t-m"><b class="n">${money(p.price)}</b>${tag}</div></div></button>
+    ${qty ? `<span class="badge n">${qty}</span><button class="minus" data-sub="${esc(p.id)}" aria-label="減少">−</button>` : ''}
+  </div>`;
+}
+
+/* ============================================================
+ * 手機銷售端：只選名字，記在手機與網址上，重新整理也不會登出
+ * ============================================================ */
+const M = { tab: 'sell', cart: [], sets: {}, materials: null, orderScope: 'mine' };
+let URLP = {};
+const setUrlStaff = sid => {
+  if (!REMOTE) return;
+  try { const q = new URLSearchParams(location.search); if (sid) q.set('u', sid); else q.delete('u'); const qs = q.toString(); history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash); } catch (e) {}
+};
+const siteUrl = st => { const u = String((st && st.salesUrl) || ''); return u && u.indexOf('script.google.com') < 0 ? u : SITE; };
+const payOptions = st => [...new Set([...(st.payments || []), ...(st.ecpayEnabled && st.ecpayName ? [st.ecpayName] : [])])];
+const isEcpayPay = (st, p) => !!st.ecpayEnabled && p === st.ecpayName;
+const hmNow = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const payUrl = key => { const u = siteUrl(M.data.settings); return u + (u.includes('?') ? '&' : '?') + 'pay=' + encodeURIComponent(key); };
+const PAYTAG = { '已收款': '', '待付款': 'amb', '已付款': 'ok', '模擬付款': 'red', '金額不符': 'red' };
+
+function startSell() {
+  document.body.classList.add('phone');
+  onErrCode = code => { if (code === 'STAFF_INVALID') { store.del('sid'); setUrlStaff(''); M.sid = ''; pickName('這個名字已停用或不存在，請重新選擇'); return true; } return false; };
+  M.sid = URLP.u || store.get('sid', '');
+  if (M.sid) { store.set('sid', M.sid); return bootSell(); }
+  pickName();
+}
+async function pickName(msg) {
+  centerScreen('<div class="spin"></div>');
+  let info;
+  try { info = await api('apiLoginInfo'); } catch (e) { return errorScreen(e); }
+  setAccent(info.settings.accent);
+  store.set('lastSettings', info.settings);
+  app.innerHTML = `<div class="m" style="padding:calc(28px + env(safe-area-inset-top)) 18px 40px">
+    ${logoHTML(info.settings, 20)}
+    <p class="lab" style="margin:56px 0 10px">銷售登入</p>
+    <h1 style="font-size:36px;line-height:1.1;margin-bottom:10px">你是哪一位？</h1>
+    <p class="muted" style="margin:0 0 28px">${esc(msg || '選擇名字後，這支手機會一直記得你，訂單會記錄是誰賣出。')}</p>
+    <div class="names">${info.staff.map(u => `<button data-u="${esc(u.id)}">${esc(u.name)}<span>→</span></button>`).join('') || '<p class="muted" style="padding:20px 0">還沒有銷售人員，請管理者到後台「人員與權限」新增。</p>'}</div>
+  </div>`;
+  $$('[data-u]').forEach(b => b.onclick = () => { M.sid = b.dataset.u; store.set('sid', M.sid); setUrlStaff(M.sid); bootSell(); });
+}
+async function bootSell() {
+  centerScreen('<div class="spin"></div>');
+  try { M.data = await api('apiBootstrap', M.sid); } catch (e) { if (e.handled) return; return errorScreen(e); }
+  setUrlStaff(M.sid);
+  const d = M.data, st = d.settings;
+  store.set('lastSettings', { appName: st.appName, logo: st.logo, accent: st.accent });
+  setAccent(st.accent);
+  M.user = d.user;
+  const pick = (v, list) => list.includes(v) ? v : list[0] || '';
+  M.payment = pick(store.get('payment'), payOptions(st));
+  const lid = store.get('loc');
+  const ok = id => d.locations.some(l => l.id === id);
+  M.loc = ok(lid) ? lid : ok(d.user.locationId) ? d.user.locationId : ok(st.defaultLocationId) ? st.defaultLocationId : (d.locations[0] || {}).id;
+  const ss = store.get('sess');
+  M.sessSel = ss && ss.date === d.summary.date ? ss.v : 'auto';
+  M.pending = store.get('pending', []);
+  M.lastSess = (curSession() || {}).id;
+  renderSell();
+  flushPending();
+  if (!M.timer) {
+    M.timer = setInterval(() => { flushPending(); refreshSummary(); }, 60000);
+    setInterval(() => { const s = (curSession() || {}).id; if (s !== M.lastSess) { M.lastSess = s; if (M.tab === 'sell' && !document.querySelector('.ov')) { renderHome(); toast('已切換到「' + ((curSession() || {}).name || '一般銷售') + '」'); } } }, 30000);
+    window.addEventListener('online', flushPending);
+  }
+}
+const locName = id => ((M.data.locations.find(l => l.id === id) || {}).name || '');
+function curSession() {
+  const st = M.data.settings, s = M.data.sessions, t = dKey(Date.now());
+  if (st.autoSession) { const hm = hmNow(); return s.find(x => x.date === t && x.start <= hm && hm <= x.end) || null; }
+  if (M.sessSel === 'auto') return s.find(x => x.date === t) || null;
+  return s.find(x => x.id === M.sessSel) || null;
+}
+const nextSession = () => { const t = dKey(Date.now()), hm = hmNow(); return M.data.sessions.find(x => x.date === t && x.start > hm) || null; };
+const stockAt = pid => ((M.data.stock[pid] || {})[M.loc]) || 0;
+const cartQty = pid => M.cart.filter(l => l.productId === pid).reduce((a, l) => a + l.qty, 0);
+
+function renderSell() {
+  const st = M.data.settings;
+  const tabs = [['sell', '銷售', ICON.sell], ['intro', '介紹', ICON.book], ['stock', '倉儲', ICON.box], ['me', '我', ICON.user]];
+  app.innerHTML = `<div class="m">${headerHTML(st, M.user.name)}<div id="pend"></div><main id="mm"></main></div>
+    <div class="cartbar" id="cb"></div>
+    <nav class="tabbar">${tabs.map(([k, t, ic]) => `<button data-tab="${k}" class="${M.tab === k ? 'on' : ''}">${ic}<span>${t}</span></button>`).join('')}</nav>`;
+  $('#who').onclick = () => go('me');
+  $$('.tabbar button').forEach(b => b.onclick = () => go(b.dataset.tab));
+  renderPending();
+  ({ sell: renderHome, intro: renderIntro, stock: renderStock, me: renderMe })[M.tab]();
+  renderCartBar();
+}
+function go(tab) { M.tab = tab; renderSell(); window.scrollTo(0, 0); }
+
+function renderHome() {
+  const st = M.data.settings, sm = M.data.summary, sess = curSession();
+  const ev = sess ? sm.event.sessions.find(x => x.id === sess.id) : null;
+  const nx = !sess && st.autoSession ? nextSession() : null;
+  const ps = M.data.products;
+  $('#mm').innerHTML = `${st.show.today ? heroHTML({ st, sess, sold: ev ? ev.units : sm.today.units, target: sess ? sess.target : 0, locName: locName(M.loc), today: sm.date, next: nx }) : ''}
+    ${st.show.stats ? statsHTML({ st, t: sm.today }) : ''}
+    <div class="sec"><h2>品項</h2><span class="lab">${ps.length} items</span></div>
+    ${ps.length ? `<div class="grid" id="grid">${ps.map(p => tileHTML(p, { st, qty: cartQty(p.id), stock: stockAt(p.id) })).join('')}</div>` : '<div class="empty">還沒有上架的品項<br><small>請到後台「品項與組合」新增</small></div>'}`;
+  const g = $('#grid');
+  if (g) g.onclick = e => {
+    const a = e.target.closest('[data-add]'), s = e.target.closest('[data-sub]');
+    if (a) cartAdd(a.dataset.add, 1); else if (s) cartAdd(s.dataset.sub, -1);
+  };
+}
+function addToCart(cart, pid, warn) {
+  const st = M.data.settings, p = M.data.products.find(x => x.id === pid); if (!p) return;
+  const inStock = cart.filter(l => l.productId === pid && l.kind === '現貨').reduce((a, l) => a + l.qty, 0);
+  const kind = st.allowPreorder && stockAt(pid) - inStock <= 0 ? '預購' : '現貨';
+  let l = cart.find(x => x.productId === pid && x.kind === kind);
+  if (!l) { l = { productId: pid, qty: 0, price: p.price, kind }; cart.push(l); }
+  l.qty++;
+  if (warn && kind === '預購' && l.qty === 1) toast(pname(p) + ' 庫存不足，已記為預購', 'warn');
+}
+function cartAdd(pid, d) {
+  const st = M.data.settings, p = M.data.products.find(x => x.id === pid); if (!p) return;
+  if (d > 0) { addToCart(M.cart, pid, true); if (navigator.vibrate) navigator.vibrate(10); }
+  else {
+    const l = M.cart.find(x => x.productId === pid && x.kind === '預購') || M.cart.find(x => x.productId === pid);
+    if (l) { l.qty--; if (l.qty <= 0) M.cart.splice(M.cart.indexOf(l), 1); }
+  }
+  const w = document.querySelector(`.tw[data-w="${CSS.escape(pid)}"]`);
+  if (w) w.outerHTML = tileHTML(p, { st, qty: cartQty(pid), stock: stockAt(pid) });
+  renderCartBar();
+}
+const pricingOf = (cart, sets) => priceCart_(cart.map(l => ({ productId: l.productId, qty: l.qty, price: l.price, kind: l.kind })), M.data.bundles, sets);
+function renderCartBar() {
+  const cb = $('#cb'); if (!cb) return;
+  const n = M.cart.reduce((a, l) => a + l.qty, 0);
+  if (!n || M.tab !== 'sell') { cb.innerHTML = ''; return; }
+  cb.innerHTML = `<button class="cartbtn" id="cbtn"><span class="cnt n">${n}</span>確認登記<span class="tot n">${money(pricingOf(M.cart, M.sets).total)} →</span></button>`;
+  $('#cbtn').onclick = () => checkoutSheet({ cart: M.cart, sets: M.sets, form: { payment: M.payment }, onSubmit: submitNew });
+};
+
+/** 結帳畫面（新增與修改共用） */
+function checkoutSheet({ cart, sets, form, title = '確認銷售', submitLabel = '登記銷售', editing = false, onSubmit }) {
+  const st = M.data.settings;
+  const f = Object.assign({ payment: M.payment, note: '', customer: '', phone: '', address: '' }, form);
+  if (!payOptions(st).includes(f.payment)) f.payment = payOptions(st)[0] || '';
+  const m = modal({ title, body: '<div id="co"></div>', foot: `<button class="btn pri lg" id="go">${esc(submitLabel)}</button>` });
+  const calc = () => {
+    const pr = pricingOf(cart, sets);
+    const rev = pr.lines.filter(l => l.kind === '現貨').reduce((a, l) => a + l.net, 0);
+    const pre = pr.lines.filter(l => l.kind === '預購').reduce((a, l) => a + l.net, 0);
+    return { pr, rev, pre, hasPre: pr.lines.some(l => l.kind === '預購'), collect: rev + (st.preorderPaid ? pre : 0) };
+  };
+  const draw = () => {
+    if (!cart.length && !editing) { m.close(); return; }
+    const { pr, rev, pre, hasPre, collect } = calc(), sess = curSession();
+    $('#co', m).innerHTML = pr.lines.map((l, i) => { const p = M.data.products.find(x => x.id === l.productId) || { name: l.productId, spec: '' };
+      return `<div class="line"><div class="top"><span class="nm">${esc(pname(p))}</span><span class="n">${money(l.net)}</span></div>
+        <div class="ctl"><div class="step"><button data-d="-1" data-i="${i}">−</button><span class="n">${l.qty}</span><button data-d="1" data-i="${i}">+</button></div>
+        ${st.allowPreorder ? `<div class="seg"><button data-k="現貨" data-i="${i}" class="${l.kind === '現貨' ? 'on' : ''}">現貨</button><button data-k="預購" data-i="${i}" class="${l.kind === '預購' ? 'on' : ''}">預購</button></div>` : ''}
+        <span class="sp"></span>${st.allowPriceEdit ? `<input class="inp pr n" type="number" inputmode="numeric" data-p="${i}" value="${l.price}" aria-label="單價">` : `<span class="lab n">@ ${money(l.price)}</span>`}</div></div>`; }).join('')
+      + (editing ? `<div class="lbl lab">加入品項</div><div class="chips">${M.data.products.map(p => `<button class="chip" data-addp="${esc(p.id)}">＋ ${esc(pname(p))}</button>`).join('')}</div>` : '')
+      + pr.applied.map(a => `<div class="bund"><div class="t"><b>${esc(a.name)} · ${money(a.price)}</b><span class="lab">${a.sets ? '省 ' + money(a.saving) : '未套用'}</span></div>
+          <div class="step"><button data-b="${esc(a.id)}" data-d="-1" ${a.sets ? '' : 'disabled'}>−</button><span class="n">${a.sets}</span><button data-b="${esc(a.id)}" data-d="1" ${a.sets >= a.max ? 'disabled' : ''}>+</button></div></div>`).join('')
+      + `<div style="margin-top:18px">
+          ${pr.discount ? `<div class="spec"><span>小計</span><span class="n">${money(pr.subtotal)}</span></div><div class="spec"><span>組合優惠</span><span class="n" style="color:var(--ac)">−${money(pr.discount)}</span></div>` : ''}
+          ${hasPre ? `<div class="spec"><span>現貨（計入營收）</span><span class="n">${money(rev)}</span></div><div class="spec"><span>預購（${st.preorderPaid ? '本次一併收款' : '不計入本次收款'}）</span><span class="n">${money(pre)}</span></div>` : ''}
+          <div class="grand"><span class="lab">本次收款</span><span class="n">${money(collect)}</span></div></div>
+        ${hasPre ? `<div class="lbl lab">預購資料${st.preorderContact ? '（姓名或電話必填）' : ''}</div><div class="two"><input class="inp" data-f="customer" placeholder="客人姓名" value="${esc(f.customer)}"><input class="inp" data-f="phone" type="tel" placeholder="電話" value="${esc(f.phone)}"></div>
+          <input class="inp" data-f="address" style="margin-top:10px" placeholder="地址${st.preorderAddress ? '（必填）' : '（宅配用，選填）'}" autocomplete="street-address" value="${esc(f.address)}">` : ''}
+        <div class="lbl lab">付款方式</div><div class="chips" id="pay">${payOptions(st).map(x => `<button class="chip ${x === f.payment ? 'on' : ''}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+        ${isEcpayPay(st, f.payment) ? '<p class="note">登記後會顯示付款 QR code，請客人用手機相機掃描付款。</p>' : f.payment === st.cashName && collect ? '<p class="note">登記時會跳出現金收款視窗，自動計算找零。</p>' : ''}
+        <div class="lbl lab">備註</div><input class="inp" data-f="note" placeholder="選填：熟客、刻字、包裝…" value="${esc(f.note)}">
+        <p class="lab" style="margin:18px 0 0">${esc(editing ? '修改訂單' : (sess ? sess.name : '一般銷售'))} · ${esc(locName(M.loc))} · ${esc(M.user.name)}</p>`;
+    $$('[data-i][data-d]', m).forEach(b => b.onclick = () => { const l = cart[+b.dataset.i]; l.qty += +b.dataset.d; if (l.qty <= 0) cart.splice(+b.dataset.i, 1); draw(); });
+    $$('[data-k]', m).forEach(b => b.onclick = () => {
+      const l = cart[+b.dataset.i]; if (l.kind === b.dataset.k) return;
+      const other = cart.find(x => x !== l && x.productId === l.productId && x.kind === b.dataset.k);
+      if (other) { other.qty += l.qty; cart.splice(cart.indexOf(l), 1); } else l.kind = b.dataset.k;
+      draw();
+    });
+    $$('[data-p]', m).forEach(i => i.onchange = () => { cart[+i.dataset.p].price = Math.max(0, Number(i.value) || 0); draw(); });
+    $$('[data-addp]', m).forEach(b => b.onclick = () => { addToCart(cart, b.dataset.addp, false); draw(); });
+    $$('[data-b]', m).forEach(b => b.onclick = () => { const a = pr.applied.find(x => x.id === b.dataset.b); sets[a.id] = Math.max(0, Math.min(a.max, a.sets + +b.dataset.d)); draw(); });
+    $$('#pay .chip', m).forEach(b => b.onclick = () => { f.payment = b.dataset.v; if (!editing) { M.payment = f.payment; store.set('payment', M.payment); } draw(); });
+    $$('[data-f]', m).forEach(i => i.oninput = () => { f[i.dataset.f] = i.value; });
+  };
+  m.onclose = () => { if (M.tab === 'sell') { renderHome(); renderCartBar(); } };
+  draw();
+  $('#go', m).onclick = async () => {
+    if (!cart.length) return toast('沒有品項', 'err');
+    const { pr, collect } = calc(), sess = curSession();
+    const setsReq = {}; pr.applied.forEach(a => setsReq[a.id] = a.sets);
+    const order = { clientId: uid(), time: Date.now(), sessionId: sess ? sess.id : '', locationId: M.loc, payment: f.payment,
+      note: f.note.trim(), customer: f.customer.trim(), phone: f.phone.trim(), address: f.address.trim(), device: deviceName(), sets: setsReq,
+      lines: cart.map(l => ({ productId: l.productId, qty: l.qty, price: l.price, kind: l.kind })) };
+    if (order.payment === st.cashName && collect > 0) {
+      const got = await cashDialog(collect);
+      if (got === null) return;
+      order.cashReceived = got;
+    } else if (collect > 0 && !isEcpayPay(st, order.payment)) {
+      const c = await payConfirmDialog(collect, order.payment, editing);
+      if (c === null) return;
+      order.confirmed = c === 'yes';
+    }
+    const go = $('#go', m); go.disabled = true; go.textContent = '處理中…';
+    try { await onSubmit(order, { pr, collect, close: () => m.close() }); }
+    catch (e) { if (!e.handled) toast(e.message, 'err'); }
+    if (document.body.contains(go)) { go.disabled = false; go.textContent = submitLabel; }
+  };
+}
+async function submitNew(order, { pr, collect, close }) {
+  const st = M.data.settings;
+  const done = () => { M.cart = []; M.sets = {}; close(); renderPending(); if (navigator.vibrate) navigator.vibrate([20, 40, 20]); };
+  try {
+    const r = await api('apiRecordSale', M.sid, order);
+    M.data.summary = r.summary; M.data.stock = r.stock;
+    done(); renderPending();
+    if (r.order && r.order.payStatus === '待付款') return ecpayDialog(r.order);
+    toast(order.cashReceived !== undefined ? `已登記 · 找零 ${money(order.cashReceived - collect)}` : order.confirmed === false ? '已登記，收款待確認' : '已登記並確認收款 ' + money(collect));
+  } catch (e) {
+    if (e.handled) return;
+    if (isNetErr(e) && !isEcpayPay(st, order.payment)) {
+      M.pending.push(order); store.set('pending', M.pending);
+      order.lines.filter(l => l.kind === '現貨').forEach(l => { const s = M.data.stock[l.productId] = M.data.stock[l.productId] || {}; s[M.loc] = (s[M.loc] || 0) - l.qty; });
+      done(); toast('網路不穩，已先存在手機，恢復後自動上傳', 'warn');
+    } else throw e;
+  }
+}
+
+/** 現金收款：輸入實收金額，自動計算找零 */
+function cashDialog(due, title = '現金收款') {
+  return new Promise(res => {
+    let done = false, val = '';
+    const up = (n, s) => Math.ceil(n / s) * s;
+    const sug = [...new Set([due, up(due, 100), up(due, 500), up(due, 1000), up(due, 1000) + 1000])].filter(v => v >= due).sort((a, b) => a - b).slice(0, 5);
+    const m = modal({ title,
+      body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>應收</span><span class="n" style="font-size:30px;font-weight:300">${money(due)}</span></div>
+        <div class="lbl lab">實收金額</div>
+        <input class="inp n" id="cin" type="number" inputmode="numeric" placeholder="輸入客人給的金額" style="font-size:28px;min-height:64px">
+        <div class="chips" style="margin-top:10px">${sug.map(v => `<button class="chip n" data-v="${v}">${v === due ? '剛好 ' : ''}${money(v)}</button>`).join('')}</div>
+        <div class="change" id="chg"></div>`,
+      foot: `<button class="btn line" data-close>取消</button><button class="btn pri lg" id="cok" style="flex:1" disabled>確認收款</button>` });
+    const inp = $('#cin', m), ok = $('#cok', m);
+    const show = () => {
+      const v = Number(val);
+      const has = val !== '' && !isNaN(v);
+      $('#chg', m).innerHTML = !has ? '' : v >= due
+        ? `<span class="lab">找零</span><b class="n">${money(v - due)}</b>`
+        : `<span class="lab" style="color:var(--red)">還差</span><b class="n" style="color:var(--red)">${money(due - v)}</b>`;
+      ok.disabled = !has || v < due;
+    };
+    inp.oninput = () => { val = inp.value; show(); };
+    $$('[data-v]', m).forEach(b => b.onclick = () => { val = b.dataset.v; inp.value = val; show(); });
+    ok.onclick = () => { done = true; m.close(); res(Math.round(Number(val))); };
+    m.onclose = () => { if (!done) res(null); };
+    setTimeout(() => inp.focus(), 50);
+  });
+}
+
+/** 非現金、非綠界的付款方式：收款二次確認 */
+function payConfirmDialog(due, payment, editing) {
+  return new Promise(res => {
+    let v = null;
+    const m = modal({ title: '確認收款',
+      body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>付款方式</span><span style="font-size:18px">${esc(payment)}</span></div>
+        <div class="spec"><span>應收金額</span><span class="n" style="font-size:34px;font-weight:300">${money(due)}</span></div>
+        <p style="margin:18px 0 6px;font-size:16px">請確認已收到客人的 <b>${esc(payment)}</b> 款項 ${money(due)}。</p>
+        <p class="note">如果客人還沒完成付款（例如轉帳稍後才會入帳），可以先登記，之後在「我的訂單」按「確認收款」。後台會標記確認人與時間。</p>`,
+      foot: `<button class="btn line" id="later">${editing ? '稍後確認' : '先登記，稍後確認'}</button><button class="btn pri" id="yes" style="flex:1">確認已收款</button>` });
+    $('#yes', m).onclick = () => { v = 'yes'; m.close(); };
+    $('#later', m).onclick = () => { v = 'later'; m.close(); };
+    m.onclose = () => res(v);
+  });
+}
+async function confirmOrder(o) {
+  if (!await confirmBox('確認收款？', `${o.payment} ${money(o.collected)}（${fmtDT(o.time)}）。確認後後台會標記為「已確認收款」，並記錄是你確認的。`, '確認已收款')) return false;
+  try { const r = await api('apiConfirmPayment', M.sid, o.orderId); M.data.summary = r.summary; renderPending(); toast('已確認收款'); return true; }
+  catch (e) { if (!e.handled) toast(e.message, 'err'); return false; }
+}
+
+/* ---- QR code ---- */
+const QRLIB = 'https:\/\/cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.5.2/qrcode.min.js';
+let qrP;
+const loadQr = () => qrP || (qrP = new Promise((res, rej) => {
+  if (window.qrcode) return res(window.qrcode);
+  const s = document.createElement('script'); s.src = QRLIB;
+  s.onload = () => res(window.qrcode); s.onerror = () => { qrP = null; rej(new Error('QR 產生器載入失敗，請檢查網路')); };
+  document.head.appendChild(s);
+}));
+async function qrSvg(text) {
+  const q = await loadQr();
+  if (q.stringToBytesFuncs && q.stringToBytesFuncs['UTF-8']) q.stringToBytes = q.stringToBytesFuncs['UTF-8'];
+  const qr = q(0, 'M'); qr.addData(text); qr.make();
+  const n = qr.getModuleCount(); let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + 3},${r + 3}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${n + 6} ${n + 6}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#111"/></svg>`;
+}
+async function fillQr(el, text) { try { el.innerHTML = await qrSvg(text); } catch (e) { el.innerHTML = `<span class="faint" style="font-size:12px;padding:10px;word-break:break-all">${esc(text)}</span>`; } }
+
+/** 綠界：顯示付款 QR，等客人付款 */
+function ecpayDialog(order) {
+  const st = M.data.settings;
+  let timer, closed = false;
+  const m = modal({ title: '請客人掃碼付款',
+    body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>付款金額</span><span class="n" style="font-size:30px;font-weight:300">${money(order.collected)}</span></div>
+      <div class="qrbig" id="qr"><div class="spin"></div></div>
+      <p class="paystat" id="pst"><span class="tag amb">等待付款</span></p>
+      <p class="note">請客人用手機相機掃描（不要用 LINE 掃），在綠界頁面完成付款，這裡會自動顯示「已付款」。</p>
+      ${DEMO ? '<button class="btn line" id="demoPay" style="width:100%;margin-top:6px">預覽：模擬客人付款完成</button>' : ''}`,
+    foot: `<button class="btn line" id="toCash">改收現金</button><button class="btn danger" id="cancel">取消訂單</button><span class="sp"></span><button class="btn pri" data-close>稍後</button>` });
+  fillQr($('#qr', m), payUrl(order.payKey));
+  const paid = () => {
+    clearInterval(timer);
+    $('#pst', m).innerHTML = '<span class="paid">✓ 已付款</span>';
+    $('#qr', m).style.opacity = .25;
+    m.querySelector('.dlg-f').innerHTML = '<button class="btn line" data-close>稍後確認</button><button class="btn pri lg" id="cfm" style="flex:1">確認收款</button>';
+    $('#cfm', m).onclick = async () => { try { const r = await api('apiConfirmPayment', M.sid, order.orderId); M.data.summary = r.summary; m.close(); renderPending(); toast('已確認收款'); } catch (e) { if (!e.handled) toast(e.message, 'err'); } };
+    toast('綠界付款完成 ' + money(order.collected)); refreshSummary(true);
+  };
+  const poll = async () => {
+    try { const r = await api('apiPayStatus', M.sid, order.orderId); if (closed) return;
+      if (r.status === '作廢') { clearInterval(timer); $('#pst', m).innerHTML = '<span class="tag red">已取消</span>'; return; }
+      if (r.payStatus === '已付款') paid(); else if (r.payStatus && r.payStatus !== '待付款') $('#pst', m).innerHTML = `<span class="tag red">${esc(r.payStatus)}</span>`;
+    } catch (e) {}
+  };
+  timer = setInterval(poll, 3000);
+  m.onclose = () => { closed = true; clearInterval(timer); if (M.tab === 'me') renderMe(); };
+  const dp = $('#demoPay', m); if (dp) dp.onclick = async () => { await api('apiDemoPay', order.orderId); poll(); };
+  $('#toCash', m).onclick = async () => {
+    const got = await cashDialog(order.collected); if (got === null) return;
+    try { await api('apiSetPayment', M.sid, order.orderId, st.cashName, got); m.close(); toast(`已改為現金 · 找零 ${money(got - order.collected)}`); }
+    catch (e) { if (!e.handled) toast(e.message, 'err'); }
+  };
+  $('#cancel', m).onclick = async () => {
+    if (!await confirmBox('取消這筆訂單？', '訂單會刪除，現貨件數退回庫存。', '取消訂單', true)) return;
+    try { const r = await api('apiVoidMyOrder', M.sid, order.orderId); M.data.summary = r.summary; M.data.stock = r.stock; m.close(); toast('已取消訂單'); }
+    catch (e) { if (!e.handled) toast(e.message, 'err'); }
+  };
+}
+
+function renderPending() {
+  const el = $('#pend'); if (!el) return;
+  const un = (M.data.summary.today || {}).myUnconfirmed || 0;
+  el.innerHTML = (M.pending.length ? `<div class="pend"><span>${M.pending.length} 筆銷售尚未上傳</span><span class="sp"></span><button class="btn sm line" id="retry">重試</button></div>` : '')
+    + (un && M.tab !== 'me' ? `<div class="pend"><span>今天有 ${un} 筆收款待確認</span><span class="sp"></span><button class="btn sm line" id="toMe">查看</button></div>` : '');
+  if (M.pending.length) $('#retry').onclick = flushPending;
+  if (un && M.tab !== 'me') $('#toMe').onclick = () => go('me');
+}
+let flushing = false;
+async function flushPending() {
+  if (flushing || !M.pending || !M.pending.length) return;
+  flushing = true;
+  try {
+    while (M.pending.length) {
+      const r = await api('apiRecordSale', M.sid, M.pending[0]);
+      M.pending.shift(); store.set('pending', M.pending); M.data.summary = r.summary; M.data.stock = r.stock;
+    }
+    toast('暫存的銷售已全部上傳');
+  } catch (e) { if (!isNetErr(e) && !e.handled) toast('上傳失敗：' + e.message, 'err'); }
+  flushing = false;
+  renderPending(); if (M.tab === 'sell' && !document.querySelector('.ov')) renderHome();
+}
+async function refreshSummary(force) {
+  if (!M.sid || (!force && (document.querySelector('.ov') || M.cart.length))) return;
+  try { const r = await api('apiSummary', M.sid); M.data.summary = r.summary; M.data.stock = r.stock; renderPending(); if (M.tab === 'sell' && !document.querySelector('.ov')) renderHome(); } catch (e) {}
+}
+
+/* ---- 介紹：QR code ＋ PDF ---- */
+async function renderIntro() {
+  const mm = $('#mm');
+  mm.innerHTML = `<div class="sec"><h2>介紹</h2><span class="lab">品牌與品項</span></div><div class="pad" id="ml">${M.materials ? '' : '<div class="spin" style="margin:40px auto"></div>'}</div>`;
+  if (!M.materials) { try { M.materials = await api('apiMaterials', M.sid); } catch (e) { if (!e.handled) $('#ml').innerHTML = `<div class="empty" style="margin:0">${esc(e.message)}</div>`; return; } }
+  const ml = $('#ml'); if (!ml) return;
+  const { files, qrs } = M.materials;
+  ml.innerHTML = (qrs.length ? `<div class="qrgrid">${qrs.map(q => `<button class="qrcard" data-q="${esc(q.id)}"><div class="qrbox" data-qr="${esc(q.id)}"></div><b>${esc(q.title)}</b><span class="lab">${esc(q.note)}</span></button>`).join('')}</div>` : '')
+    + (files.length ? `<div style="border-top:1px solid var(--ink);margin-top:${qrs.length ? 28 : 0}px">${files.map(x => `<button class="mat" data-id="${esc(x.id)}"><span class="ic">PDF</span><span style="flex:1"><b>${esc(x.name)}</b><span class="lab">${fmtSize(x.size)}</span></span><span class="faint">→</span></button>`).join('')}</div>` : '')
+    + (!qrs.length && !files.length ? `<div class="empty" style="margin:0">還沒有介紹資料<br><small>請在後台「簡介資料」上傳 PDF 或新增 QR code</small></div>` : '');
+  qrs.forEach(q => { const el = ml.querySelector(`[data-qr="${CSS.escape(q.id)}"]`); if (q.image) el.innerHTML = `<img src="${esc(q.image)}" alt="">`; else fillQr(el, q.url); });
+  $$('[data-q]', ml).forEach(b => b.onclick = () => showQr(qrs.find(x => x.id === b.dataset.q)));
+  $$('[data-id]', ml).forEach(b => b.onclick = () => openViewer(files.find(x => x.id === b.dataset.id), M.sid));
+}
+function showQr(q) {
+  const m = modal({ title: q.title, body: `<div class="qrbig" id="qb"></div>${q.note ? `<p style="text-align:center;margin:0 0 6px">${esc(q.note)}</p>` : ''}${q.url ? `<p class="lab" style="text-align:center;word-break:break-all">${esc(q.url)}</p>` : ''}` });
+  const el = $('#qb', m);
+  if (q.image) el.innerHTML = `<img src="${esc(q.image)}" alt="">`; else fillQr(el, q.url);
+}
+
+function progressHTML() {
+  const st = M.data.settings, sm = M.data.summary, ev = sm.event;
+  if (!st.show.progress || !ev.sessions.length) return '';
+  const maxU = Math.max(1, ...ev.sessions.map(s => Math.max(s.units, s.target)));
+  const p = pct(ev.units, ev.target), H = 110;
+  return `<section class="hero" style="border-top:1px solid var(--line)">
+      <div class="top"><span class="lab">活動進度</span><span class="lab">${esc(ev.name || '')}</span></div>
+      <div class="prog"><div class="nums"><span class="big n">${fmtN(ev.units)}</span><span class="muted n">/ ${fmtN(ev.target)} ${esc(st.unit)}</span><span class="pc n">${p}%</span></div><div class="bar thick"><i style="width:${Math.min(100, p)}%"></i></div></div>
+      ${st.allowPreorder ? `<div class="spec" style="margin-top:14px"><span>預購登記累計</span><span class="n">${fmtN(ev.pre)} ${esc(st.unit)}</span></div>` : ''}
+      <div class="minibars">${ev.sessions.map(s => { const fut = s.date > sm.date, cls = s.date === sm.date ? 'now' : fut ? 'future' : '';
+        return `<div class="col"><span class="v n">${fut ? '' : fmtN(s.units)}</span><div class="b ${cls}" style="height:${Math.max(2, (fut ? s.target : s.units) / maxU * H)}px"></div>${s.target && !fut ? `<span class="tg" style="bottom:${s.target / maxU * H}px"></span>` : ''}</div>`; }).join('')}</div>
+      <div class="mlabels">${ev.sessions.map(s => `<span class="lab">${md(s.date)}</span>`).join('')}</div>
+    </section>`;
+}
+
+/* ---- 倉儲：各倉儲庫存、切換出貨倉儲、最近異動 ---- */
+async function renderStock() {
+  const mm = $('#mm');
+  if (!M.viewLoc || !M.data.locations.some(l => l.id === M.viewLoc)) M.viewLoc = M.loc;
+  const draw = log => {
+    const st = M.data.settings, d = M.data, low = Number(st.lowStock) || 0, vl = M.viewLoc;
+    const qty = (pid, lid) => ((d.stock[pid] || {})[lid]) || 0;
+    const tot = d.products.reduce((a, p) => a + qty(p.id, vl), 0);
+    const alerts = d.products.filter(p => qty(p.id, vl) <= (p.safety === '' ? low : p.safety)).length;
+    mm.innerHTML = `<section class="hero"><div class="top"><span class="lab">倉儲</span><span class="lab">${vl === M.loc ? '目前出貨倉儲' : '查看中'}</span></div>
+        <h1>${esc(locName(vl))}</h1><div class="sub n">共 ${fmtN(tot)} ${esc(st.unit)}${alerts ? ` · <span style="color:var(--amb)">${alerts} 項偏低</span>` : ''}</div></section>
+      <div class="pad"><div class="chips" id="vlocs">${d.locations.map(l => `<button class="chip ${l.id === vl ? 'on' : ''}" data-l="${esc(l.id)}">${esc(l.name)}${l.id === M.loc ? ' ●' : ''}</button>`).join('')}</div>
+        ${vl !== M.loc ? `<button class="btn line lg" id="setLoc" style="margin-top:14px">設為我的出貨倉儲（銷售時從這裡扣庫存）</button>` : ''}
+        <div style="border-top:1px solid var(--ink);margin-top:18px">
+        ${d.products.map(p => { const q = qty(p.id, vl), sf = p.safety === '' ? low : p.safety;
+          return `<div class="srow">${thumbHTML(p)}<div><b>${esc(p.name)}</b><span class="faint" style="font-size:13px">${esc(p.spec)}</span></div>
+            <div class="q n" style="color:${q < 0 ? 'var(--red)' : q <= sf ? 'var(--amb)' : 'inherit'}">${fmtN(q)}<small class="lab">${q <= 0 ? (st.allowPreorder ? '可預購' : '缺貨') : q <= sf ? '偏低' : esc(unitOf(st, p))}</small></div></div>`; }).join('') || '<p class="muted">沒有品項</p>'}
+        </div></div>
+      ${d.locations.length > 1 ? `<div class="sec"><h2>各倉儲</h2><span class="lab">總覽</span></div>
+        <div class="pad scroll"><table class="t mtx"><thead><tr><th>品項</th>${d.locations.map(l => `<th class="r ${l.id === vl ? 'cur' : ''}">${esc(l.name)}</th>`).join('')}<th class="r">合計</th></tr></thead><tbody>
+        ${d.products.map(p => `<tr><td>${esc(p.spec || p.name)}</td>${d.locations.map(l => `<td class="r n ${l.id === vl ? 'cur' : ''}">${fmtN(qty(p.id, l.id))}</td>`).join('')}<td class="r n">${fmtN(stockTotal(d.stock, p.id))}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}
+      <div class="sec"><h2>最近異動</h2><span class="lab">${log ? '最新 40 筆' : ''}</span></div>
+      <div class="pad">${!log ? '<div class="spin" style="margin:20px auto"></div>' : log.length ? `<div style="border-top:1px solid var(--ink)">${log.slice(0, M.logAll ? 40 : 12).map(l => `<div class="spec"><span>${fmtDT(l.time)} · ${esc(l.locationName)}<br><span style="color:var(--ink)">${esc(l.productName)}</span> · ${esc(l.reason)}</span><span class="n" style="color:${l.delta < 0 ? 'var(--red)' : 'var(--ok)'}">${l.delta > 0 ? '+' : ''}${fmtN(l.delta)}<br><span class="faint" style="font-size:12px">結存 ${fmtN(l.balance)}</span></span></div>`).join('')}</div>${!M.logAll && log.length > 12 ? '<button class="btn line lg" id="logAll" style="margin-top:14px">顯示更多</button>' : ''}` : '<p class="muted">尚無紀錄</p>'}</div>`;
+    const la = $('#logAll'); if (la) la.onclick = () => { M.logAll = true; draw(log); };
+    $$('#vlocs .chip').forEach(b => b.onclick = () => { M.viewLoc = b.dataset.l; draw(log); });
+    const sl = $('#setLoc'); if (sl) sl.onclick = () => { M.loc = M.viewLoc; store.set('loc', M.loc); toast('出貨倉儲已改為「' + locName(M.loc) + '」'); draw(log); };
+  };
+  draw(M.stockLog || null);
+  try { const r = await api('apiStockInfo', M.sid); M.data.stock = r.stock; M.stockLog = r.log; if (M.tab === 'stock') draw(r.log); }
+  catch (e) { if (!e.handled && M.tab === 'stock') toast(e.message, 'err'); }
+}
+function orderHTML(o, actions) {
+  const st = M.data.settings, voided = o.status === '作廢';
+  const ecPaid = o.payStatus === '已付款' && isEcpayPay(st, o.payment);
+  const amount = Number(o.collected) || !Number(o.preorderAmount) ? money(o.collected) : '預購 ' + money(o.preorderAmount);
+  return `<div class="ord ${voided ? 'void' : ''}"><div class="hd"><span class="lab n">${fmtT(o.time)}</span><span class="lab">${esc(o.staffName)} · ${esc(o.payment)}</span>
+      ${voided ? '<span class="tag red">已刪除</span>' : o.payStatus && o.payStatus !== '已收款' ? `<span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${!voided && !o.confirmed && o.payStatus !== '待付款' ? '<span class="tag amb">待確認收款</span>' : ''}${o.editedAt ? '<span class="tag">已修改</span>' : ''}
+      <span class="sp"></span><span class="n">${amount}</span></div>
+    ${o.items.map(i => `<div class="it">${esc(i.productName)} <span class="faint n">× ${i.qty}</span>${i.kind === '預購' ? '<span class="tag amb">預購</span>' : ''}</div>`).join('')}
+    ${o.setsText ? `<div class="lab" style="margin-top:4px">${esc(o.setsText)}</div>` : ''}
+    ${o.cashReceived !== '' && o.cashReceived != null ? `<div class="lab" style="margin-top:4px">實收 ${money(o.cashReceived)} · 找零 ${money(o.change)}</div>` : ''}
+    ${o.customer || o.phone || o.address ? `<div class="lab" style="margin-top:4px">${esc([o.customer, o.phone, o.address].filter(Boolean).join(' · '))}</div>` : ''}
+    ${o.confirmed && o.confirmedBy && !voided ? `<div class="lab" style="margin-top:4px;color:var(--ok)">✓ 收款已確認 · ${esc(o.confirmedBy)}${o.confirmedAt ? ' ' + fmtT(o.confirmedAt) : ''}</div>` : ''}
+    ${actions && !voided ? `<div class="row" style="margin-top:10px;flex-wrap:wrap">
+      ${o.payStatus === '待付款' ? `<button class="btn sm ac" data-qr="${esc(o.orderId)}">顯示付款 QR</button>` : ''}
+      ${!o.confirmed && o.payStatus !== '待付款' ? `<button class="btn sm pri" data-cf="${esc(o.orderId)}">確認收款</button>` : ''}
+      ${st.staffEdit && !ecPaid ? `<button class="btn sm line" data-ed="${esc(o.orderId)}">修改</button><button class="btn sm danger" data-del="${esc(o.orderId)}">刪除</button>` : ''}
+      ${ecPaid ? '<span class="lab">已透過綠界付款，如需退款請聯絡管理者</span>' : ''}</div>` : ''}
+  </div>`;
+}
+
+async function renderMe() {
+  const st = M.data.settings, d = M.data, u = M.user, mm = $('#mm');
+  const sessOpts = [{ v: 'auto', t: '今天的場次' }, ...d.sessions.map(s => ({ v: s.id, t: md(s.date) + ' ' + s.name })), { v: '', t: '一般銷售' }];
+  const grp = (label, key, opts) => `<div class="lbl lab">${label}</div><div class="chips" data-k="${key}">${opts.map(o => `<button class="chip ${o.v === M[key] ? 'on' : ''}" data-v="${esc(o.v)}">${esc(o.t)}</button>`).join('') || '<span class="faint">（請在後台設定）</span>'}</div>`;
+  const cs = curSession();
+  mm.innerHTML = `<section class="hero"><span class="lab">目前登入</span><h1>${esc(u.name)}</h1><div class="sub">${esc(deviceName())}</div></section>
+    ${progressHTML()}
+    <div class="pad" style="border-top:1px solid var(--line);padding-top:4px">
+      ${st.autoSession ? `<div class="lbl lab">目前場次（依時間自動切換）</div><p style="margin:0">${esc(cs ? cs.name + '　' + cs.start + '–' + cs.end : '目前不在任何場次時間內（一般銷售）')}</p>` : grp('目前場次', 'sessSel', sessOpts)}
+      ${grp('出貨倉儲（從這裡扣庫存）', 'loc', d.locations.map(l => ({ v: l.id, t: l.name })))}
+      ${grp('預設付款方式', 'payment', payOptions(st).map(v => ({ v, t: v })))}
+    </div>
+    <div class="sec"><h2>我的訂單</h2><span class="lab">${st.staffEdit ? '可修改／刪除' : '僅供查看'}</span></div>
+    <div class="pad" id="myo"><div class="spin" style="margin:30px auto"></div></div>
+    <div class="pad" style="margin-top:30px"><button class="btn line lg" id="sw">切換人員</button>
+      <p class="note">這支手機會一直記住你的名字，重新整理或關掉網頁都不會登出。把網頁「加入主畫面」最方便。</p></div>`;
+  $$('[data-k]', mm).forEach(g => $$('.chip', g).forEach(b => b.onclick = () => {
+    const k = g.dataset.k; M[k] = b.dataset.v;
+    if (k === 'sessSel') store.set('sess', { date: M.data.summary.date, v: M.sessSel }); else store.set(k, M[k]);
+    $$('.chip', g).forEach(x => x.classList.toggle('on', x === b));
+  }));
+  $('#sw').onclick = async () => {
+    if (M.cart.length && !await confirmBox('切換人員？', '購物清單會被清空。', '切換')) return;
+    store.del('sid'); setUrlStaff(''); M.sid = ''; M.cart = []; M.tab = 'sell'; pickName();
+  };
+  let list;
+  try { list = await api('apiMyOrders', M.sid); } catch (e) { if (!e.handled && $('#myo')) $('#myo').innerHTML = `<div class="empty" style="margin:0">${esc(e.message)}</div>`; return; }
+  const box = $('#myo'); if (!box || M.tab !== 'me') return;
+  M.myOrders = list;
+  if (!list.length) { box.innerHTML = '<div class="empty" style="margin:0">還沒有訂單</div>'; return; }
+  const days = {}; list.forEach(o => (days[dKey(o.time)] = days[dKey(o.time)] || []).push(o));
+  box.innerHTML = Object.entries(days).map(([k, os], i) => { const ok = os.filter(o => o.status !== '作廢');
+    return `<details class="day" ${i === 0 ? 'open' : ''}><summary><span>${md(k)}（${WD[new Date(k + 'T12:00:00').getDay()]}）· ${ok.length} 筆 ▾</span><span class="n">${money(ok.reduce((a, o) => a + o.total, 0))}</span></summary>${os.map(o => orderHTML(o, true)).join('')}</details>`; }).join('');
+  const find = id => M.myOrders.find(o => o.orderId === id);
+  $$('[data-qr]', box).forEach(b => b.onclick = () => ecpayDialog(find(b.dataset.qr)));
+  $$('[data-cf]', box).forEach(b => b.onclick = async () => { if (await confirmOrder(find(b.dataset.cf))) renderMe(); });
+  $$('[data-del]', box).forEach(b => b.onclick = async () => {
+    const o = find(b.dataset.del);
+    if (!await confirmBox('刪除這筆訂單？', `${fmtDT(o.time)} ${money(o.collected)}。刪除後現貨件數會退回庫存，後台會保留「已刪除」紀錄。`, '刪除', true)) return;
+    try { const r = await api('apiVoidMyOrder', M.sid, o.orderId); M.data.summary = r.summary; M.data.stock = r.stock; toast('已刪除'); renderMe(); } catch (e) { if (!e.handled) toast(e.message, 'err'); }
+  });
+  $$('[data-ed]', box).forEach(b => b.onclick = () => {
+    const o = find(b.dataset.ed);
+    const cart = o.items.map(i => ({ productId: i.productId, qty: i.qty, price: i.listPrice, kind: i.kind }));
+    const sets = Object.assign({}, o.setsMap || {});
+    M.data.bundles.forEach(bb => { if (sets[bb.id] === undefined) sets[bb.id] = 0; });
+    checkoutSheet({ cart, sets, editing: true, title: '修改訂單', submitLabel: '儲存修改',
+      form: { payment: o.payment, note: o.note, customer: o.customer, phone: o.phone, address: o.address },
+      onSubmit: async (order, { close }) => {
+        const r = await api('apiEditMyOrder', M.sid, o.orderId, order);
+        M.data.summary = r.summary; M.data.stock = r.stock; close();
+        toast(order.cashReceived !== undefined ? `已修改 · 找零 ${money(order.cashReceived - r.order.collected)}` : '已修改');
+        if (r.order.payStatus === '待付款') ecpayDialog(r.order); else renderMe();
+      } });
+  });
+}
+
+/* ---- 客人掃 QR 後看到的付款頁 ---- */
+async function startPay(key) {
+  document.body.classList.add('phone');
+  centerScreen('<div class="spin"></div>');
+  let info;
+  try { info = await api('apiPayInfo', key); } catch (e) { return errorScreen(e, '無法付款'); }
+  setAccent(info.accent);
+  renderPayPage(app, info, key);
+}
+function renderPayPage(root, info, key) {
+  const inApp = /Line\/|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
+  const paid = info.payStatus === '已付款', voided = info.status === '作廢';
+  root.innerHTML = `<div class="m" style="padding:calc(28px + env(safe-area-inset-top)) 18px 40px">
+    ${logoHTML(info, 18)}
+    <p class="lab" style="margin:48px 0 8px">${paid ? '付款完成' : voided ? '訂單已取消' : '付款'}</p>
+    <h1 style="font-size:52px;font-weight:300;letter-spacing:-.04em" class="n">${money(info.amount)}</h1>
+    <div style="border-top:1px solid var(--ink);margin-top:22px">${info.items.map(i => `<div class="spec"><span>${esc(i.name)}${i.kind === '預購' ? '（預購）' : ''}</span><span class="n">× ${i.qty}</span></div>`).join('')}</div>
+    <div id="payact" style="margin-top:28px">
+      ${paid ? '<p class="paid">✓ 已付款，謝謝！</p><p class="muted">可以把畫面給店員確認。</p>'
+        : voided ? '<p class="muted">這筆訂單已取消或改用其他方式付款，請洽店員。</p>'
+        : `${inApp ? '<p class="note" style="color:var(--red);border-color:var(--red)">你正在 LINE／Facebook／Instagram 內開啟，可能無法付款。請點右上角「⋯」選擇「用瀏覽器開啟」。</p>' : ''}
+           <button class="btn ac lg" id="topay">前往綠界付款 →</button>
+           ${info.stage ? '<p class="lab" style="margin-top:10px">測試環境：不會實際扣款</p>' : ''}
+           <p class="muted" style="font-size:13px;margin-top:14px">付款完成後會自動回到這一頁顯示結果。</p>`}
+    </div></div>`;
+  const b = $('#topay', root);
+  if (b && info.form) b.onclick = () => {
+    const f = document.createElement('form');
+    f.method = 'POST'; f.action = info.form.action; f.target = '_top'; f.acceptCharset = 'UTF-8';
+    Object.entries(info.form.fields).forEach(([k, v]) => { const i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i); });
+    document.body.appendChild(f); f.submit();
+  };
+  if (!paid && !voided && key && !DEMO) {
+    const t = setInterval(async () => { try { const r = await api('apiPayCheck', key); if (r.payStatus === '已付款' || r.status === '作廢') { clearInterval(t); info.payStatus = r.payStatus; info.status = r.status; renderPayPage(root, info, key); } } catch (e) {} }, 4000);
+  }
+}
+
+/* ============================================================
+ * 後台：用 Google 帳號辨識，管理者名單內才能進入
+ * ============================================================ */
+const A = { view: store.get('aview', 'dash'), range: 'event', staff: '', sess: '*', q: '', conf: '' };
+const VIEWS = [['dash', '總覽'], ['orders', '訂單'], ['products', '品項與組合'], ['stock', '庫存與倉儲'], ['event', '活動與目標'], ['people', '人員與權限'], ['appset', '銷售 App'], ['materials', '簡介資料'], ['system', '系統']];
+
+/* Google 登入：ID token 存在這台裝置，約 1 小時到期，到期後自動重新登入 */
+const tokExp = t => { try { const p = JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '\/'))))); return (p.exp || 0) * 1000; } catch (e) { return 0; } };
+const tokEmail = t => { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '\/'))).email || ''; } catch (e) { return ''; } };
+const loadToken = () => { const t = store.get('idt', ''); return t && tokExp(t) - 60000 > Date.now() ? t : ''; };
+const clearToken = () => { ID_TOKEN = ''; store.del('idt'); };
+let gisReady = null;
+const loadGis = () => gisReady || (gisReady = new Promise((res, rej) => {
+  const s = document.createElement('script'); s.src = 'https:\/\/accounts.google.com/gsi/client'; s.async = true;
+  s.onload = res; s.onerror = () => { gisReady = null; rej(new Error('無法載入 Google 登入，請確認網路連線')); };
+  document.head.appendChild(s);
+}));
+async function adminLogin(msg = '') {
+  centerScreen(`${logoHTML(store.get('lastSettings'), 22)}
+    <h2 style="font-size:34px;margin:40px 0 10px">後台登入</h2>
+    <p class="muted" style="margin:0 0 26px">請用管理者的 Google 帳號登入。只有「人員與權限 → 管理者」名單裡的帳號可以進入。</p>
+    <div id="gbtn" style="min-height:44px"></div>
+    <p id="lmsg" style="margin:18px 0 0;font-size:14px;color:var(--red)">${msg}</p>`);
+  let cfg;
+  try { cfg = await api('apiPublicConfig'); } catch (e) { return errorScreen(e); }
+  if (cfg && cfg.appName) store.set('lastSettings', { appName: cfg.appName, logo: cfg.logo, accent: cfg.accent });
+  if (!cfg || !cfg.clientId) return errorScreen('後台還沒設定 Google 登入用戶端 ID。請在 Apps Script 的 GOOGLE_CLIENT_ID 填入後重新部署。', '還差一步');
+  try { await loadGis(); } catch (e) { return errorScreen(e); }
+  const gid = window.google && window.google.accounts && window.google.accounts.id;
+  gid.initialize({ client_id: cfg.clientId, auto_select: true, cancel_on_tap_outside: false, use_fedcm_for_prompt: true,
+    callback: r => { if (!r || !r.credential) return; ID_TOKEN = r.credential; store.set('idt', r.credential); startAdmin(); } });
+  const box = $('#gbtn'); if (!box) return;
+  gid.renderButton(box, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', locale: 'zh-TW', width: Math.min(320, box.clientWidth || 320) });
+  if (!msg) gid.prompt();
+}
+function adminLogout() {
+  const email = tokEmail(ID_TOKEN);
+  clearToken();
+  try { const gid = window.google && window.google.accounts && window.google.accounts.id; if (gid) { gid.disableAutoSelect(); if (email) gid.revoke(email, () => {}); } } catch (e) {}
+  adminLogin('已登出。');
+}
+function startAdmin() {
+  document.body.classList.remove('phone');
+  const authErr = m => /^(NO_GOOGLE|AUTH_)/.test(m);
+  onErrCode = m => { if (REMOTE && authErr(m)) { clearToken(); adminLogin('登入已過期，請重新登入。'); return true; } return false; };
+  if (REMOTE) { ID_TOKEN = loadToken(); if (!ID_TOKEN) return adminLogin(); }
+  loadAdmin().catch(e => {
+    if (e.handled) return;
+    const m = e.message || '';
+    if (m.startsWith('NOT_ADMIN:')) {
+      errorScreen(`目前登入的 Google 帳號 <b>${esc(m.slice(10))}</b> 不在管理者名單內。<br><br>請已是管理者的人到「人員與權限」把你加入，或換一個帳號登入。`, '沒有後台權限');
+      const b = $('.center .btn'); if (b) { b.removeAttribute('onclick'); b.textContent = '換一個帳號登入'; b.onclick = adminLogout; }
+      return;
+    }
+    if (m === 'NO_CLIENT_ID') return errorScreen('後台還沒設定 Google 登入用戶端 ID。請在 Apps Script 的 GOOGLE_CLIENT_ID 填入後重新部署。', '還差一步');
+    errorScreen(e);
+  });
+}
+async function loadAdmin() {
+  if (!A.d) centerScreen('<div class="spin"></div>');
+  A.d = await api('apiAdminData');
+  setAccent(A.d.settings.accent);
+  store.set('lastSettings', { appName: A.d.settings.appName, logo: A.d.settings.logo, accent: A.d.settings.accent });
+  renderAdmin();
+}
+async function act(fn, okMsg) {
+  try { const r = await fn(); if (okMsg) toast(okMsg); await loadAdmin(); return r; }
+  catch (e) { toast(e.message, 'err'); throw e; }
+}
+function renderAdmin() {
+  const d = A.d, y = window.scrollY;
+  app.innerHTML = `<div class="a">
+    <aside class="a-side">${logoHTML(d.settings, 16)}
+      ${VIEWS.map(([k, t]) => `<button class="nav ${A.view === k ? 'on' : ''}" data-v="${k}">${t}</button>`).join('')}
+      <div class="me"><span class="lab">Google 帳號</span><br>${esc(d.me.email)}${REMOTE ? '<br><button class="btn sm line" id="logout" style="margin-top:10px">登出</button>' : ''}</div>
+    </aside><main class="a-main" id="am"></main></div>`;
+  const lo = $('#logout'); if (lo) lo.onclick = adminLogout;
+  $$('.nav').forEach(b => b.onclick = () => { A.view = b.dataset.v; store.set('aview', A.view); renderAdmin(); window.scrollTo(0, 0); });
+  ({ dash: vDash, orders: vOrders, products: vProducts, stock: vStock, event: vEvent, people: vPeople, appset: vAppSet, materials: vMaterials, system: vSystem }[A.view] || vDash)();
+  window.scrollTo(0, y);
+}
+const head = (crumb, title, desc, right = '') => `<div class="lab crumb">後台 / ${esc(crumb)}</div><div class="a-head"><div class="tt"><h1>${esc(title)}</h1>${desc ? `<p>${desc}</p>` : ''}</div>${right}</div>`;
+const validItems = () => A.d.items.filter(i => i.status !== '作廢');
+const validOrders = () => A.d.orders.filter(o => o.status !== '作廢');
+const prodLabel = (p, all) => { const same = all.filter(x => x.name === p.name).length > 1; return same && p.spec ? p.spec : p.spec ? p.name + ' ' + p.spec : p.name; };
+
+/* ---- 總覽（參考 VGhouse 銷售記錄表） ---- */
+function vDash() {
+  const d = A.d, st = d.settings, ss = d.sessions, unit = st.unit;
+  const items = validItems(), orders = validOrders();
+  const inEvent = ss.length ? (x => ss.some(s => s.id === x.sessionId)) : (() => true);
+  const evItems = items.filter(inEvent), evOrders = orders.filter(inEvent);
+  const target = Number(st.totalTarget) || ss.reduce((a, s) => a + s.target, 0);
+  const live = evItems.filter(i => i.kind === '現貨');
+  const sold = live.reduce((a, i) => a + i.qty, 0), rev = live.reduce((a, i) => a + i.amount, 0);
+  const pre = evItems.filter(i => i.kind === '預購').reduce((a, i) => a + i.qty, 0);
+  const p = pct(sold, target);
+  const usedP = new Set(items.map(i => i.productId));
+  const cols = d.products.filter(x => x.active || usedP.has(x.id));
+  const bcols = d.bundles.filter(b => b.active || orders.some(o => o.setsMap && o.setsMap[b.id]));
+  const rowFor = sid => {
+    const its = items.filter(i => i.sessionId === sid), os = orders.filter(o => o.sessionId === sid);
+    const lv = its.filter(i => i.kind === '現貨');
+    return { per: cols.map(c => lv.filter(i => i.productId === c.id).reduce((a, i) => a + i.qty, 0)),
+      sets: bcols.map(b => os.reduce((a, o) => a + ((o.setsMap || {})[b.id] || 0), 0)),
+      units: lv.reduce((a, i) => a + i.qty, 0), rev: lv.reduce((a, i) => a + i.amount, 0),
+      pre: its.filter(i => i.kind === '預購').reduce((a, i) => a + i.qty, 0) };
+  };
+  const rows = ss.map(s => ({ s, ...rowFor(s.id) }));
+  const other = rowFor('');
+  const hasOther = items.some(i => !ss.some(s => s.id === i.sessionId));
+  const sum = f => rows.reduce((a, r) => a + r[f], 0);
+  const tot = { per: cols.map((_, i) => rows.reduce((a, r) => a + r.per[i], 0)), sets: bcols.map((_, i) => rows.reduce((a, r) => a + r.sets[i], 0)), units: sum('units'), rev: sum('rev'), pre: sum('pre'), target: ss.reduce((a, s) => a + s.target, 0) };
+  const today = dKey(Date.now());
+  const byP = {}; live.forEach(i => { const o = byP[i.productId] = byP[i.productId] || { id: i.productId, name: i.productName, qty: 0, rev: 0 }; o.qty += i.qty; o.rev += i.amount; });
+  const pRows = Object.values(byP).sort((a, b) => b.qty - a.qty), maxQ = Math.max(1, ...pRows.map(x => x.qty));
+  const byS = {}; evOrders.forEach(o => { const x = byS[o.staffName] = byS[o.staffName] || { n: 0, u: 0, r: 0 }; x.n++; x.u += Number(o.units) || 0; x.r += Number(o.total) || 0; });
+  const byPay = {}; evOrders.forEach(o => byPay[o.payment || '—'] = (byPay[o.payment || '—'] || 0) + (Number(o.collected) || 0));
+  const low = Number(st.lowStock) || 0;
+  const alerts = d.products.filter(x => x.active).map(x => ({ p: x, tot: stockTotal(d.stock, x.id), safety: x.safety === '' ? low : x.safety })).filter(x => x.tot <= x.safety);
+  const pmap = Object.fromEntries(d.products.map(x => [x.id, x]));
+  const c = (v, cls = 'r n') => `<td class="${cls}">${v}</td>`;
+  const payE = Object.entries(byPay).sort((a, b) => b[1] - a[1]), payMax = Math.max(1, ...payE.map(x => x[1]));
+
+  $('#am').innerHTML = head('總覽', st.eventName || '銷售總覽', esc(st.eventNote || (ss.length ? '' : '尚未設定活動場次，以下為全部銷售。到「活動與目標」新增場次與目標。')), '<button class="btn line" id="toEvent">編輯場次與目標 →</button>')
+    + `<div class="kpis">
+      <div class="kpi main"><span class="lab">目標達成率</span><b class="n">${target ? p + '%' : '—'}</b><div class="bar"><i style="width:${Math.min(100, p)}%"></i></div><span class="s">目標 ${fmtN(target)} ${esc(unit)}</span></div>
+      <div class="kpi"><span class="lab">累計售出（${esc(unit)}）</span><b class="n">${fmtN(sold)}</b><span class="s">${fmtN(evOrders.length)} 筆訂單</span></div>
+      <div class="kpi"><span class="lab">累計營收（NT$）</span><b class="n">${fmtN(rev)}</b><span class="s">${evOrders.filter(o => !o.confirmed).length ? `<a href="#" id="toUnconf" style="color:var(--amb)">${evOrders.filter(o => !o.confirmed).length} 筆未確認收款 →</a>` : '收款皆已確認'}</span></div>
+      <div class="kpi"><span class="lab">距目標還差（${esc(unit)}）</span><b class="n">${target ? fmtN(Math.max(0, target - sold)) : '—'}</b><span class="s">${target && sold >= target ? '已達標' : '&nbsp;'}</span></div>
+      <div class="kpi"><span class="lab">預購登記累計（${esc(unit)}）</span><b class="n">${fmtN(pre)}</b><span class="s">不計入售出</span></div>
+    </div>
+    <div class="box"><h3>每日銷售登記<span class="sp"></span><span class="lab">黃色欄位可直接修改 · 其餘自動計算</span></h3>
+      ${ss.length ? `<div class="scroll"><table class="t daily"><thead><tr><th>日期</th><th style="min-width:150px">場次</th><th class="r">預估售出<br>（${esc(unit)}）</th>
+        ${cols.map(x => `<th class="r" title="${esc(pname(x))}">${esc(prodLabel(x, cols))}<br>（${esc(unitOf(st, x))}）</th>`).join('')}
+        ${bcols.map(b => `<th class="r">其中 ${esc(b.name)}<br>（組）</th>`).join('')}
+        <th class="r">售出合計<br>（${esc(unit)}）</th><th class="r">營收<br>（NT$）</th><th class="r">達成率</th>${st.allowPreorder ? `<th class="r">預購登記<br>（${esc(unit)}）</th>` : ''}<th style="min-width:180px">備註</th></tr></thead><tbody>
+        ${rows.map(r => `<tr${r.s.date === today ? ' style="font-weight:500"' : ''}><td class="n">${md(r.s.date)}${r.s.date === today ? ' <span class="tag ac">今天</span>' : ''}</td><td>${esc(r.s.name)}</td>
+          <td class="ed"><input class="r n" type="number" data-st="${esc(r.s.id)}" value="${r.s.target}"></td>
+          ${r.per.map(v => c(fmtN(v))).join('')}${r.sets.map(v => c(fmtN(v))).join('')}
+          ${c(fmtN(r.units))}${c(fmtN(r.rev))}${c(r.s.target ? pct(r.units, r.s.target) + '%' : '—')}${st.allowPreorder ? c(fmtN(r.pre)) : ''}
+          <td class="ed"><input data-sn="${esc(r.s.id)}" value="${esc(r.s.note)}" placeholder="—"></td></tr>`).join('')}
+        ${hasOther ? `<tr class="faint"><td></td><td>一般銷售（非場次）</td><td class="r">—</td>${other.per.map(v => c(fmtN(v))).join('')}${other.sets.map(v => c(fmtN(v))).join('')}${c(fmtN(other.units))}${c(fmtN(other.rev))}<td class="r">—</td>${st.allowPreorder ? c(fmtN(other.pre)) : ''}<td></td></tr>` : ''}
+        </tbody><tfoot><tr><td></td><td>合計</td>${c(fmtN(tot.target))}${tot.per.map(v => c(fmtN(v))).join('')}${tot.sets.map(v => c(fmtN(v))).join('')}${c(fmtN(tot.units))}${c(fmtN(tot.rev))}${c(tot.target ? pct(tot.units, tot.target) + '%' : '—')}${st.allowPreorder ? c(fmtN(tot.pre)) : ''}<td></td></tr></tfoot></table></div>`
+      : '<p class="muted">還沒有活動場次。</p>'}
+    </div>
+    ${ss.length ? `<div class="box"><h3>每日售出與預估<span class="sp"></span><span class="lab">▮ 售出　┄ 預估</span></h3><div class="fig" id="fig"><svg></svg><div class="tip" id="tip"></div></div></div>` : ''}
+    <div class="cols">
+      <div class="box"><h3>品項排行<span class="sp"></span><span class="lab">${ss.length ? '活動期間' : '全部'}</span></h3>${pRows.length ? `<table class="t"><thead><tr><th>品項</th><th class="r">${esc(unit)}</th><th style="width:28%"></th><th class="r">營收</th><th class="r">目前庫存</th></tr></thead><tbody>
+        ${pRows.map(x => `<tr><td><div class="row">${thumbHTML(pmap[x.id] || { name: x.name })}<span>${esc(x.name)}</span></div></td><td class="r n">${fmtN(x.qty)}</td><td><div class="bar thick"><i style="width:${x.qty / maxQ * 100}%"></i></div></td><td class="r n">${money(x.rev)}</td><td class="r n">${pmap[x.id] ? fmtN(stockTotal(d.stock, x.id)) : '—'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">還沒有銷售</p>'}</div>
+      <div class="box"><h3>庫存提醒<span class="sp"></span>${alerts.length ? `<span class="tag red">${alerts.length} 項</span>` : ''}</h3>${alerts.length ? `<div class="blist">${alerts.map(x => `<div class="row" style="padding:12px 0;border-bottom:1px solid var(--line)">${thumbHTML(x.p)}<span style="flex:1">${esc(pname(x.p))}<br><span class="lab">${d.locations.map(l => esc(l.name) + ' ' + fmtN((d.stock[x.p.id] || {})[l.id] || 0)).join(' · ')}</span></span><span class="n" style="color:${x.tot < 0 ? 'var(--red)' : 'var(--amb)'}">${fmtN(x.tot)}</span></div>`).join('')}</div>` : '<p class="muted">庫存都在安全量以上</p>'}</div>
+    </div>
+    <div class="cols2">
+      <div class="box"><h3>銷售人員</h3>${Object.keys(byS).length ? `<table class="t"><thead><tr><th>人員</th><th class="r">訂單</th><th class="r">${esc(unit)}</th><th class="r">營收</th></tr></thead><tbody>${Object.entries(byS).sort((a, b) => b[1].r - a[1].r).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r n">${v.n}</td><td class="r n">${fmtN(v.u)}</td><td class="r n">${money(v.r)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">沒有資料</p>'}</div>
+      <div class="box"><h3>付款方式</h3>${payE.length ? `<div class="blist">${payE.map(([k, v]) => `<div class="bl"><span>${esc(k)}</span><span class="n">${money(v)}</span><div class="bar thick"><i style="width:${v / payMax * 100}%"></i></div></div>`).join('')}</div>` : '<p class="muted">沒有資料</p>'}</div>
+    </div>`;
+  $('#toEvent').onclick = () => { A.view = 'event'; store.set('aview', 'event'); renderAdmin(); };
+  const tu = $('#toUnconf'); if (tu) tu.onclick = e => { e.preventDefault(); A.view = 'orders'; A.conf = 'no'; A.range = 'all'; store.set('aview', 'orders'); renderAdmin(); };
+  const saveS = (id, patch) => { const s = A.d.sessions.find(x => x.id === id); act(() => api('apiSaveSession', { ...s, ...patch }), '已儲存'); };
+  $$('[data-st]').forEach(i => i.onchange = () => saveS(i.dataset.st, { target: Number(i.value) || 0 }));
+  $$('[data-sn]').forEach(i => i.onchange = () => saveS(i.dataset.sn, { note: i.value }));
+  if (ss.length) drawDaily(rows, today);
+}
+function drawDaily(rows, today) {
+  const fig = $('#fig'); if (!fig) return;
+  const svg = $('svg', fig), tip = $('#tip');
+  const ac = getComputedStyle(document.documentElement).getPropertyValue('--ac').trim() || '#E74118';
+  const draw = () => {
+    const W = svg.clientWidth, H = svg.clientHeight; if (!W) return;
+    const L = 44, R = 4, Tp = 18, B = 40, iw = W - L - R, ih = H - Tp - B;
+    const max = Math.max(1, ...rows.map(r => Math.max(r.units, r.s.target)));
+    const step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step;
+    const n = rows.length, bw = iw / n, w = Math.min(44, bw * 0.4);
+    const y = v => Tp + ih - v / nice * ih;
+    svg.innerHTML = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(f * nice)}" y2="${y(f * nice)}" stroke="${f ? '#E7E7E7' : '#111'}"/><text x="${L - 10}" y="${y(f * nice) + 4}" text-anchor="end" font-size="11" fill="#A3A3A3" font-family="IBM Plex Mono">${fmtN(f * nice)}</text>`).join('')
+      + rows.map((r, i) => { const cx = L + i * bw + bw / 2, h = r.units / nice * ih, fut = r.s.date > today;
+        return `<rect x="${cx - w / 2}" y="${y(r.units)}" width="${w}" height="${Math.max(0, h)}" fill="${r.s.date === today ? ac : '#111'}"/>`
+          + (r.s.target ? `<line x1="${cx - w / 2 - 10}" x2="${cx + w / 2 + 10}" y1="${y(r.s.target)}" y2="${y(r.s.target)}" stroke="#111" stroke-dasharray="3 3"/>` : '')
+          + (!fut ? `<text x="${cx}" y="${y(r.units) - 8}" text-anchor="middle" font-size="12" fill="#111">${fmtN(r.units)}</text>` : '')
+          + `<text x="${cx}" y="${H - 20}" text-anchor="middle" font-size="11" fill="#6A6A6A" font-family="IBM Plex Mono">${md(r.s.date)}</text><text x="${cx}" y="${H - 4}" text-anchor="middle" font-size="11" fill="#A3A3A3">${esc(W / n < 96 ? '' : r.s.name.replace(/（.*）/, ''))}</text>`
+          + `<rect data-i="${i}" x="${L + i * bw}" y="${Tp}" width="${bw}" height="${ih}" fill="transparent"/>`; }).join('');
+  };
+  draw();
+  const ro = new ResizeObserver(draw); ro.observe(svg);
+  svg.onmousemove = e => { const i = e.target.dataset && e.target.dataset.i; if (i === undefined) { tip.style.opacity = 0; return; } const r = rows[i], b = fig.getBoundingClientRect();
+    tip.innerHTML = `${esc(md(r.s.date) + ' ' + r.s.name)}<br>${fmtN(r.units)} / ${fmtN(r.s.target)} · ${money(r.rev)}`; tip.style.left = (e.clientX - b.left) + 'px'; tip.style.top = (e.clientY - b.top) + 'px'; tip.style.opacity = 1; };
+  svg.onmouseleave = () => tip.style.opacity = 0;
+}
+
+/* ---- 訂單 ---- */
+function rangeOf(r) {
+  const now = new Date(), t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime(), day = 864e5;
+  if (r === 'today') return [t0, t0 + day];
+  if (r === '7d') return [t0 - 6 * day, t0 + day];
+  if (r === '30d') return [t0 - 29 * day, t0 + day];
+  return [0, Infinity];
+}
+function vOrders() {
+  const d = A.d, st = d.settings, [a, b] = rangeOf(A.range), q = A.q.trim().toLowerCase();
+  const itemsBy = {}; d.items.forEach(i => (itemsBy[i.orderId] = itemsBy[i.orderId] || []).push(i));
+  let list = d.orders.filter(o => o.time >= a && o.time < b && (A.range !== 'event' || d.sessions.some(s => s.id === o.sessionId))
+    && (!A.staff || o.staffName === A.staff) && (A.sess === '*' || o.sessionId === A.sess) && (!A.conf || (A.conf === 'no' ? !o.confirmed && o.status !== '作廢' : o.confirmed)));
+  if (q) list = list.filter(o => [o.orderId, o.staffName, o.payment, o.payStatus, o.sessionName, o.note, o.customer, o.phone, o.address, o.device, ...(itemsBy[o.orderId] || []).map(i => i.productName)].join(' ').toLowerCase().includes(q));
+  list = list.slice().sort((x, y) => y.time - x.time);
+  const ok = list.filter(o => o.status !== '作廢');
+  const staffs = [...new Set(d.orders.map(o => o.staffName))];
+  $('#am').innerHTML = head('訂單', '訂單', `${fmtN(ok.length)} 筆 · 售出 ${fmtN(ok.reduce((s, o) => s + Number(o.units), 0))} ${esc(st.unit)} · 營收 ${money(ok.reduce((s, o) => s + Number(o.total), 0))}${list.length - ok.length ? ` · 另有 ${list.length - ok.length} 筆作廢` : ''}${ok.filter(o => o.payStatus === '待付款').length ? ` · <span style="color:var(--amb)">${ok.filter(o => o.payStatus === '待付款').length} 筆待付款</span>` : ''}${ok.filter(o => !o.confirmed).length ? ` · <span style="color:var(--amb)">${ok.filter(o => !o.confirmed).length} 筆未確認收款</span>` : ''}`)
+    + `<div class="row" style="flex-wrap:wrap;margin-bottom:20px">
+      <div class="seg" id="rg">${[['event', '活動期間'], ['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['all', '全部']].map(([k, t]) => `<button data-r="${k}" class="${A.range === k ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <select class="inp" id="fs" style="width:auto;min-height:38px;padding:6px 10px;font-size:14px"><option value="">全部人員</option>${staffs.map(s => `<option ${s === A.staff ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
+      <select class="inp" id="fss" style="width:auto;min-height:38px;padding:6px 10px;font-size:14px"><option value="*">全部場次</option>${d.sessions.map(s => `<option value="${esc(s.id)}" ${s.id === A.sess ? 'selected' : ''}>${esc(md(s.date) + ' ' + s.name)}</option>`).join('')}<option value="" ${A.sess === '' ? 'selected' : ''}>一般銷售</option></select>
+      <select class="inp" id="fc" style="width:auto;min-height:38px;padding:6px 10px;font-size:14px"><option value="">全部收款確認</option><option value="no" ${A.conf === 'no' ? 'selected' : ''}>未確認收款</option><option value="yes" ${A.conf === 'yes' ? 'selected' : ''}>已確認收款</option></select>
+      <input class="inp" id="q" placeholder="搜尋品項、人員、客人、裝置…" style="width:260px;min-height:38px;padding:6px 10px;font-size:14px" value="${esc(A.q)}">
+    </div>
+    <div class="scroll"><table class="t"><thead><tr><th>時間</th><th>來源</th><th>場次</th><th>品項</th><th class="r">組</th><th class="r">營收</th><th class="r">預購</th><th>付款／收款</th><th>收款確認</th><th>客人／地址／備註</th><th></th></tr></thead><tbody>
+    ${list.slice(0, 600).map(o => `<tr class="${o.status === '作廢' ? 'void' : ''}"><td class="n">${fmtDT(o.time)}<br><span class="lab">${esc(o.orderId)}</span></td>
+      <td>${esc(o.staffName)}<br><span class="lab">${esc(o.device)}</span></td><td>${esc(o.sessionName)}</td>
+      <td>${(itemsBy[o.orderId] || []).map(i => `${esc(i.productName)} <span class="faint n">×${i.qty}</span>${i.kind === '預購' ? ' <span class="tag amb">預購</span>' : ''}`).join('<br>')}</td>
+      <td class="r n">${Number(o.sets) || ''}</td><td class="r n">${money(o.total)}</td><td class="r n">${Number(o.preorderAmount) ? money(o.preorderAmount) : ''}</td><td style="white-space:nowrap">${esc(o.payment)}${o.payStatus && o.payStatus !== '已收款' ? `<br><span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${o.cashReceived !== '' && o.cashReceived != null ? `<br><span class="lab">實收 ${fmtN(o.cashReceived)}／找 ${fmtN(o.change)}</span>` : ''}</td>
+      <td style="white-space:nowrap">${o.status === '作廢' ? '' : o.confirmed ? `<span class="tag ok">已確認</span><br><span class="lab">${esc(o.confirmedBy || '—')}${o.confirmedAt ? ' ' + fmtDT(o.confirmedAt) : ''}</span>` : `<span class="tag amb">未確認</span><br><button class="btn sm line" data-acf="${esc(o.orderId)}" style="margin-top:4px">標記已確認</button>`}</td>
+      <td>${esc([o.customer, o.phone].filter(Boolean).join(' '))}${o.address ? `<br><span class="faint">${esc(o.address)}</span>` : ''}${o.note ? `<br><span class="faint">${esc(o.note)}</span>` : ''}${o.editedAt ? `<br><span class="tag">已修改 ${fmtDT(o.editedAt)}</span>` : ''}</td>
+      <td class="r">${o.status === '作廢' ? '<span class="tag">已作廢</span>' : `<button class="btn sm danger" data-void="${esc(o.orderId)}">作廢</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="faint" style="text-align:center;padding:48px">沒有符合的訂單</td></tr>'}
+    </tbody></table></div>${list.length > 600 ? '<p class="lab">只顯示最近 600 筆，完整資料在試算表「訂單」分頁。</p>' : ''}`;
+  $$('#rg button').forEach(x => x.onclick = () => { A.range = x.dataset.r; vOrders(); });
+  $('#fs').onchange = e => { A.staff = e.target.value; vOrders(); };
+  $('#fss').onchange = e => { A.sess = e.target.value; vOrders(); };
+  $('#fc').onchange = e => { A.conf = e.target.value; vOrders(); };
+  $$('[data-acf]').forEach(x => x.onclick = async () => { if (await confirmBox('標記為已確認收款？', `訂單 ${x.dataset.acf}。會記錄為由你（${A.d.me.email}）確認。`, '確認')) act(() => api('apiAdminConfirm', x.dataset.acf), '已標記確認'); });
+  const qi = $('#q'); qi.oninput = () => { A.q = qi.value; clearTimeout(qi._t); qi._t = setTimeout(() => { vOrders(); const n = $('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+  $$('[data-void]').forEach(x => x.onclick = async () => {
+    if (await confirmBox('作廢這筆訂單？', `訂單 ${x.dataset.void} 會標記為作廢，現貨件數退回原出貨倉儲。`, '作廢', true)) act(() => api('apiVoidOrder', x.dataset.void), '已作廢並退回庫存');
+  });
+}
+
+/* ---- 品項與組合 ---- */
+function vProducts() {
+  const d = A.d;
+  $('#am').innerHTML = head('品項與組合', '品項與組合', '這裡的圖片、名稱、價格就是手機上的品項按鈕；順序即按鈕順序。', '<button class="btn pri" id="add">＋ 新增品項</button>')
+    + `<div class="box"><h3>品項<span class="sp"></span><span class="lab">${d.products.length} items</span></h3><div class="scroll"><table class="t"><thead><tr><th></th><th>品項</th><th class="r">售價</th><th class="r">成本</th><th>單位</th><th class="r">總庫存</th><th>銷售頁</th><th>順序</th><th></th></tr></thead><tbody>
+    ${d.products.map((p, i) => `<tr><td style="width:60px">${thumbHTML(p)}</td><td>${esc(p.name)} <span class="faint">${esc(p.spec)}</span></td>
+      <td class="r n">${money(p.price)}</td><td class="r n faint">${p.cost === '' ? '—' : money(p.cost)}</td><td>${esc(unitOf(d.settings, p))}</td><td class="r n">${fmtN(stockTotal(d.stock, p.id))}</td>
+      <td><button class="sw ${p.active ? 'on' : ''}" data-act="${esc(p.id)}" aria-label="銷售頁顯示"></button></td>
+      <td style="white-space:nowrap"><button class="btn sm ghost" data-mv="${i},-1" ${i ? '' : 'disabled'}>↑</button><button class="btn sm ghost" data-mv="${i},1" ${i < d.products.length - 1 ? '' : 'disabled'}>↓</button></td>
+      <td class="r"><button class="btn sm line" data-ed="${esc(p.id)}">編輯</button></td></tr>`).join('') || '<tr><td colspan="9" class="faint" style="text-align:center;padding:40px">還沒有品項</td></tr>'}
+    </tbody></table></div></div>
+    <div class="box"><h3>組合優惠<span class="sp"></span><button class="btn sm pri" id="addB">＋ 新增組合</button></h3>
+      <p class="note">例如「2 隻組 NT$2,500」：結帳時自動套用，銷售人員可在確認畫面調整組數；總覽的每日銷售表會統計組數。</p>
+      ${d.bundles.length ? `<table class="t"><thead><tr><th>名稱</th><th class="r">件數</th><th class="r">組合價</th><th>適用品項</th><th>狀態</th><th></th></tr></thead><tbody>
+        ${d.bundles.map(b => `<tr><td>${esc(b.name)}</td><td class="r n">${b.size}</td><td class="r n">${money(b.price)}</td><td>${b.productIds.length ? b.productIds.map(id => { const p = d.products.find(x => x.id === id); return p ? esc(pname(p)) : ''; }).filter(Boolean).join('、') : '<span class="faint">全部品項</span>'}</td>
+          <td>${b.active ? '<span class="tag ok">啟用</span>' : '<span class="tag">停用</span>'}</td><td class="r"><button class="btn sm line" data-eb="${esc(b.id)}">編輯</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">還沒有組合優惠</p>'}
+    </div>`;
+  $('#add').onclick = () => productEditor();
+  $('#addB').onclick = () => bundleEditor();
+  $$('[data-ed]').forEach(b => b.onclick = () => productEditor(d.products.find(p => p.id === b.dataset.ed)));
+  $$('[data-eb]').forEach(b => b.onclick = () => bundleEditor(d.bundles.find(x => x.id === b.dataset.eb)));
+  $$('[data-act]').forEach(b => b.onclick = () => { const p = d.products.find(x => x.id === b.dataset.act); b.classList.toggle('on'); act(() => api('apiSetActive', p.id, !p.active), !p.active ? '已顯示在銷售頁' : '已從銷售頁隱藏'); });
+  $$('[data-mv]').forEach(b => b.onclick = () => { const [i, dd] = b.dataset.mv.split(',').map(Number); const ids = d.products.map(p => p.id); [ids[i], ids[i + dd]] = [ids[i + dd], ids[i]]; act(() => api('apiSaveOrder', 'products', ids)); });
+}
+function productEditor(p) {
+  const isNew = !p; p = p || { name: '', spec: '', price: '', cost: '', unit: '', safety: '', active: true, image: '' };
+  let image = p.image, active = p.active;
+  const st = A.d.settings;
+  const m = modal({ title: isNew ? '新增品項' : '編輯品項', wide: true,
+    body: `<div class="ed2"><div><label class="imgbox" id="ib">${image ? `<img src="${esc(image)}" alt="">` : '點擊或拖曳<br>上傳圖片'}<input type="file" accept="image/\x2a" hidden id="fi"></label>
+        <p class="lab" style="width:180px;margin:10px 0">手機上的按鈕圖，會自動裁成正方形</p>${image ? '<button class="btn sm line" id="rmImg">移除圖片</button>' : ''}</div>
+      <div class="fs"><label class="field"><span>名稱</span><input class="inp" id="f_name" value="${esc(p.name)}" placeholder="例：Coin Cat"></label>
+        <label class="field"><span>規格</span><input class="inp" id="f_spec" value="${esc(p.spec)}" placeholder="例：亮面、霧面"></label>
+        <div class="two"><label class="field"><span>售價</span><input class="inp n" id="f_price" type="number" value="${esc(p.price)}"></label>
+        <label class="field"><span>成本（只在後台）</span><input class="inp n" id="f_cost" type="number" value="${esc(p.cost)}"></label></div>
+        <div class="two"><label class="field"><span>單位（空白＝${esc(st.unit)}）</span><input class="inp" id="f_unit" value="${esc(p.unit)}" placeholder="${esc(st.unit)}"></label>
+        <label class="field"><span>安全庫存（空白＝${esc(st.lowStock)}）</span><input class="inp n" id="f_safety" type="number" value="${esc(p.safety)}"></label></div>
+        <div class="togrow" style="border-top:1px solid var(--line)"><div>顯示在銷售頁<small>關閉後手機上不會出現，但保留紀錄</small></div><button class="sw ${active ? 'on' : ''}" id="f_act" type="button"></button></div>
+        ${isNew ? '<p class="note">新增後到「庫存與倉儲」輸入各倉儲的數量。</p>' : ''}</div></div>`,
+    foot: `${isNew ? '' : '<button class="btn danger" id="del">刪除</button>'}<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="save">儲存</button>` });
+  const ib = $('#ib', m), fi = $('#fi', m);
+  const setImg = async f => { if (!f) return; try { image = await processImage(f); ib.innerHTML = `<img src="${image}" alt="">`; ib.appendChild(fi); } catch (e) { toast(e.message, 'err'); } };
+  fi.onchange = () => setImg(fi.files[0]);
+  ib.ondragover = e => { e.preventDefault(); ib.style.borderColor = 'var(--ac)'; };
+  ib.ondragleave = () => ib.style.borderColor = '';
+  ib.ondrop = e => { e.preventDefault(); ib.style.borderColor = ''; setImg(e.dataTransfer.files[0]); };
+  const rm = $('#rmImg', m); if (rm) rm.onclick = () => { image = ''; ib.innerHTML = '點擊或拖曳<br>上傳圖片'; ib.appendChild(fi); rm.remove(); };
+  const sw = $('#f_act', m); sw.onclick = () => { active = !active; sw.classList.toggle('on', active); };
+  $('#save', m).onclick = async () => {
+    const v = id => $('#f_' + id, m).value.trim();
+    if (!v('name')) return toast('請輸入名稱', 'err');
+    try { await act(() => api('apiSaveProduct', { id: p.id, name: v('name'), spec: v('spec'), price: v('price'), cost: v('cost'), unit: v('unit'), safety: v('safety'), active, image: image === p.image ? undefined : image }), '已儲存'); m.close(); } catch (e) {}
+  };
+  const del = $('#del', m);
+  if (del) del.onclick = async () => { if (await confirmBox('刪除品項？', `「${pname(p)}」與它的庫存資料會被刪除。已有銷售紀錄的品項無法刪除，請改為隱藏。`, '刪除', true)) { try { await act(() => api('apiDeleteProduct', p.id), '已刪除'); m.close(); } catch (e) {} } };
+}
+function bundleEditor(b) {
+  const isNew = !b; b = b || { name: '', size: 2, price: '', productIds: [], active: true };
+  let active = b.active;
+  const m = modal({ title: isNew ? '新增組合優惠' : '編輯組合優惠',
+    body: `<label class="field"><span>名稱</span><input class="inp" id="bn" value="${esc(b.name)}" placeholder="例：2 隻組"></label>
+      <div class="two"><label class="field"><span>幾件一組</span><input class="inp n" id="bs" type="number" min="2" value="${esc(b.size)}"></label><label class="field"><span>組合價</span><input class="inp n" id="bp" type="number" value="${esc(b.price)}"></label></div>
+      <div class="lab" style="margin:4px 0 10px">適用品項（不選＝全部品項都可混搭）</div>
+      <div class="chips" id="bpi">${A.d.products.map(p => `<button class="chip ${b.productIds.includes(p.id) ? 'on' : ''}" data-v="${esc(p.id)}">${esc(pname(p))}</button>`).join('')}</div>
+      <div class="togrow" style="margin-top:16px;border-top:1px solid var(--line)"><div>啟用<small>停用後結帳不會套用</small></div><button class="sw ${active ? 'on' : ''}" id="ba" type="button"></button></div>`,
+    foot: `${isNew ? '' : '<button class="btn danger" id="del">刪除</button>'}<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
+  $$('#bpi .chip', m).forEach(c => c.onclick = () => c.classList.toggle('on'));
+  const sw = $('#ba', m); sw.onclick = () => { active = !active; sw.classList.toggle('on', active); };
+  $('#ok', m).onclick = async () => { try { await act(() => api('apiSaveBundle', { id: b.id, name: $('#bn', m).value, size: $('#bs', m).value, price: $('#bp', m).value, active, productIds: $$('#bpi .chip.on', m).map(c => c.dataset.v) }), '已儲存'); m.close(); } catch (e) {} };
+  const del = $('#del', m); if (del) del.onclick = async () => { if (await confirmBox('刪除組合？', '過去訂單的組數紀錄會保留。', '刪除', true)) { try { await act(() => api('apiDeleteBundle', b.id), '已刪除'); m.close(); } catch (e) {} } };
+}
+
+/* ---- 庫存與倉儲 ---- */
+function vStock() {
+  const d = A.d, low = Number(d.settings.lowStock) || 0;
+  const locTot = l => d.products.reduce((a, p) => a + ((d.stock[p.id] || {})[l.id] || 0), 0);
+  $('#am').innerHTML = head('庫存與倉儲', '庫存與倉儲', '點數字可以入庫、盤點或調撥。銷售時會從銷售人員選的倉儲自動扣除。')
+    + `<div class="box"><h3>庫存<span class="sp"></span><span class="lab">品項 × 倉儲</span></h3><div class="scroll"><table class="t"><thead><tr><th>品項</th>${d.locations.map(l => `<th class="r">${esc(l.name)}</th>`).join('')}<th class="r">合計</th><th class="r">安全庫存</th></tr></thead><tbody>
+    ${d.products.map(p => { const sf = p.safety === '' ? low : p.safety, tot = stockTotal(d.stock, p.id);
+      return `<tr><td><div class="row">${thumbHTML(p)}<span>${esc(p.name)} <span class="faint">${esc(p.spec)}</span>${p.active ? '' : ' <span class="tag">隱藏</span>'}</span></div></td>
+      ${d.locations.map(l => { const q = (d.stock[p.id] || {})[l.id] || 0; return `<td class="r" style="padding:4px"><button class="cell n ${q < 0 ? 'neg' : q === 0 ? 'zero' : ''}" data-p="${esc(p.id)}" data-l="${esc(l.id)}">${fmtN(q)}</button></td>`; }).join('')}
+      <td class="r n" style="color:${tot < 0 ? 'var(--red)' : tot <= sf ? 'var(--amb)' : 'inherit'};font-weight:500">${fmtN(tot)}</td><td class="r n faint">${fmtN(sf)}</td></tr>`; }).join('') || `<tr><td colspan="${d.locations.length + 3}" class="faint" style="text-align:center;padding:40px">請先新增品項</td></tr>`}
+    </tbody></table></div></div>
+    <div class="cols">
+      <div class="box"><h3>庫存異動紀錄<span class="sp"></span><span class="lab">最近 300 筆</span></h3><div style="max-height:460px;overflow:auto"><table class="t"><thead><tr><th>時間</th><th>品項</th><th>位置</th><th class="r">變動</th><th class="r">結存</th><th>原因</th></tr></thead><tbody>
+        ${d.stockLog.map(l => `<tr><td class="n faint">${fmtDT(l.time)}</td><td>${esc(l.productName)}</td><td>${esc(l.locationName)}</td><td class="r n" style="color:${l.delta < 0 ? 'var(--red)' : 'var(--ok)'}">${l.delta > 0 ? '+' : ''}${fmtN(l.delta)}</td><td class="r n">${fmtN(l.balance)}</td><td class="faint">${esc(l.reason)}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">尚無紀錄</td></tr>'}
+      </tbody></table></div></div>
+      <div class="box"><h3>倉儲位置<span class="sp"></span><button class="btn sm pri" id="addL">＋ 新增</button></h3>
+        ${d.locations.map(l => `<div class="linkrow"><span style="flex:1">${esc(l.name)}${l.id === d.settings.defaultLocationId ? ' <span class="tag ac">預設</span>' : ''}<br><span class="faint" style="font-size:13px">${esc(l.note) || '—'}</span></span><span class="n faint">${fmtN(locTot(l))}</span><button class="btn sm line" data-el="${esc(l.id)}">編輯</button></div>`).join('')}
+      </div>
+    </div>`;
+  $$('.cell').forEach(b => b.onclick = () => stockDialog(b.dataset.p, b.dataset.l));
+  $('#addL').onclick = () => locationEditor();
+  $$('[data-el]').forEach(b => b.onclick = () => locationEditor(d.locations.find(l => l.id === b.dataset.el)));
+}
+function stockDialog(pid, lid) {
+  const d = A.d, p = d.products.find(x => x.id === pid), l = d.locations.find(x => x.id === lid);
+  const cur = (d.stock[pid] || {})[lid] || 0, others = d.locations.filter(x => x.id !== lid);
+  let mode = 'add';
+  const m = modal({ title: `${pname(p)} · ${l.name}`,
+    body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>目前庫存</span><span class="n" style="font-size:28px;font-weight:300">${fmtN(cur)} <small class="muted" style="font-size:14px">${esc(unitOf(d.settings, p))}</small></span></div>
+      <div class="seg" id="md" style="margin:20px 0"><button data-m="add" class="on">入庫／出庫</button><button data-m="set">盤點設定為</button><button data-m="move">調撥</button></div><div id="mf"></div>`,
+    foot: `<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">確定</button>` });
+  const draw = () => {
+    $$('#md button', m).forEach(b => b.classList.toggle('on', b.dataset.m === mode));
+    $('#mf', m).innerHTML = mode === 'add'
+      ? `<label class="field"><span>數量（負數為出庫）</span><input class="inp n" id="q" type="number" placeholder="例：10 或 -2"></label><label class="field"><span>原因</span><input class="inp" id="r" placeholder="例：新到貨、樣品、損壞"></label>`
+      : mode === 'set' ? `<label class="field"><span>實際數量</span><input class="inp n" id="q" type="number" value="${cur}"></label><label class="field"><span>原因</span><input class="inp" id="r" value="盤點"></label>`
+      : others.length ? `<label class="field"><span>調撥到</span><select class="inp" id="to">${others.map(o => `<option value="${esc(o.id)}">${esc(o.name)}（目前 ${fmtN((d.stock[pid] || {})[o.id] || 0)}）</option>`).join('')}</select></label><label class="field"><span>數量</span><input class="inp n" id="q" type="number" min="1"></label><label class="field"><span>原因</span><input class="inp" id="r" placeholder="選填：帶去展場"></label>`
+      : '<p class="note">只有一個倉儲位置，請先新增其他位置。</p>';
+    const q = $('#q', m); q && q.focus();
+  };
+  $$('#md button', m).forEach(b => b.onclick = () => { mode = b.dataset.m; draw(); });
+  draw();
+  $('#ok', m).onclick = async () => {
+    const q = $('#q', m), r = $('#r', m);
+    if (!q || q.value === '') return toast('請輸入數量', 'err');
+    try {
+      if (mode === 'move') await act(() => api('apiTransferStock', { productId: pid, from: lid, to: $('#to', m).value, qty: q.value, reason: r.value.trim() }), '已調撥');
+      else await act(() => api('apiAdjustStock', { productId: pid, locationId: lid, mode, qty: q.value, reason: r.value.trim() }), '庫存已更新');
+      m.close();
+    } catch (e) {}
+  };
+}
+function locationEditor(l) {
+  const isNew = !l; l = l || { name: '', note: '' };
+  const m = modal({ title: isNew ? '新增倉儲位置' : '編輯倉儲位置',
+    body: `<label class="field"><span>名稱</span><input class="inp" id="n" value="${esc(l.name)}" placeholder="例：展場、工作室二樓"></label><label class="field"><span>說明</span><input class="inp" id="o" value="${esc(l.note)}"></label>`,
+    foot: `${isNew ? '' : '<button class="btn danger" id="del">刪除</button>'}<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
+  $('#ok', m).onclick = async () => { try { await act(() => api('apiSaveLocation', { id: l.id, name: $('#n', m).value, note: $('#o', m).value }), '已儲存'); m.close(); } catch (e) {} };
+  const del = $('#del', m);
+  if (del) del.onclick = async () => { if (await confirmBox('刪除位置？', `「${l.name}」需要先清空庫存才能刪除。`, '刪除', true)) { try { await act(() => api('apiDeleteLocation', l.id), '已刪除'); m.close(); } catch (e) {} } };
+}
+
+/* ---- 活動與目標 ---- */
+function vEvent() {
+  const d = A.d, st = d.settings, auto = d.sessions.reduce((a, s) => a + s.target, 0);
+  $('#am').innerHTML = head('活動與目標', '活動與目標', '設定每個場次的日期與時間。開啟「依時間自動切換」後，手機會在時間到時自動換到下一個場次。')
+    + `<div class="box"><h3>場次<span class="sp"></span><button class="btn sm pri" id="addS">＋ 新增場次</button></h3>
+        <div class="togrow" style="border-bottom:1px solid var(--line)"><div>依時間自動切換場次<small>開啟：銷售端依下表的日期與時間自動切換，不在任何時段內時記為「一般銷售」；關閉：銷售人員在「我」自己選擇</small></div><button class="sw ${st.autoSession ? 'on' : ''}" id="autoS" type="button"></button></div>
+        <div class="scroll"><table class="t"><thead><tr><th style="width:160px">日期</th><th style="width:110px">開始</th><th style="width:110px">結束</th><th>場次名稱</th><th class="r" style="width:120px">預估（${esc(st.unit)}）</th><th>備註</th><th></th></tr></thead><tbody>
+        ${d.sessions.map(s => `<tr data-row="${esc(s.id)}"><td class="ed"><input type="date" data-f="date" value="${esc(s.date)}"></td><td class="ed"><input type="time" data-f="start" value="${esc(s.start)}"></td><td class="ed"><input type="time" data-f="end" value="${esc(s.end)}"></td><td class="ed"><input data-f="name" value="${esc(s.name)}"></td><td class="ed"><input class="r n" type="number" data-f="target" value="${s.target}"></td><td class="ed"><input data-f="note" value="${esc(s.note)}"></td><td class="r"><button class="btn sm ghost" data-del="${esc(s.id)}">刪除</button></td></tr>`).join('') || '<tr><td colspan="7" class="faint" style="text-align:center;padding:40px">還沒有場次</td></tr>'}
+        </tbody>${d.sessions.length ? `<tfoot><tr><td></td><td></td><td></td><td>合計</td><td class="r n">${fmtN(auto)}</td><td colspan="2"></td></tr></tfoot>` : ''}</table></div>
+        <p class="lab" style="margin-top:14px">修改後離開欄位就會自動儲存 · 同一天可以有多個場次（例如上午貴賓場、下午一般場）</p>
+      </div>
+      <div class="box" style="max-width:720px"><h3>活動資訊</h3><div style="height:16px"></div>
+        <label class="field"><span>活動名稱</span><input class="inp" id="ev_n" value="${esc(st.eventName)}" placeholder="例：VGhouse 展覽"></label>
+        <label class="field"><span>說明（總覽標題下方）</span><input class="inp" id="ev_note" value="${esc(st.eventNote)}" placeholder="例：只記錄銷售；財務與對帳由○○處理。"></label>
+        <div class="two"><label class="field"><span>總目標（0＝場次加總 ${fmtN(auto)}）</span><input class="inp n" id="ev_t" type="number" value="${esc(st.totalTarget)}"></label>
+        <label class="field"><span>計算單位</span><input class="inp" id="ev_u" value="${esc(st.unit)}" placeholder="件、隻、個"></label></div>
+        <button class="btn pri" id="ev_save">儲存活動資訊</button>
+      </div>`;
+  $$('[data-row] input').forEach(i => i.onchange = () => {
+    const tr = i.closest('tr'), v = f => $(`[data-f="${f}"]`, tr).value;
+    act(() => api('apiSaveSession', { id: tr.dataset.row, date: v('date'), start: v('start'), end: v('end'), name: v('name'), target: Number(v('target')) || 0, note: v('note') }), '已儲存');
+  });
+  $('#autoS').onclick = () => act(() => api('apiSaveSettings', { autoSession: !st.autoSession }), !st.autoSession ? '已開啟自動切換' : '已改為手動選擇');
+  $$('[data-del]').forEach(b => b.onclick = async () => { if (await confirmBox('刪除場次？', '已登記的訂單會保留，但不再歸到這個場次的統計。', '刪除', true)) act(() => api('apiDeleteSession', b.dataset.del), '已刪除'); });
+  $('#addS').onclick = () => {
+    const last = d.sessions[d.sessions.length - 1];
+    const nd = last ? new Date(new Date(last.date + 'T12:00:00').getTime() + 864e5) : new Date();
+    act(() => api('apiSaveSession', { date: dKey(nd.getTime()), start: last ? last.start : '10:00', end: last ? last.end : '20:00', name: `活動第 ${d.sessions.length + 1} 天（週${WD[nd.getDay()]}）`, target: last ? last.target : 0, note: '' }), '已新增，請修改日期與名稱');
+  };
+  $('#ev_save').onclick = () => act(() => api('apiSaveSettings', { eventName: $('#ev_n').value.trim(), eventNote: $('#ev_note').value.trim(), totalTarget: Number($('#ev_t').value) || 0, unit: $('#ev_u').value.trim() || '件' }), '已儲存');
+}
+
+/* ---- 人員與權限 ---- */
+function vPeople() {
+  const d = A.d, su = siteUrl(d.settings);
+  const link = u => su ? su + (su.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(u.id) : '';
+  $('#am').innerHTML = head('人員與權限', '人員與權限', '銷售人員在手機上選名字就能登記，不需要密碼；後台只有下方「管理者」名單裡的 Google 帳號能進入。')
+    + `<div class="box"><h3>銷售人員<span class="sp"></span><button class="btn sm pri" id="addU">＋ 新增人員</button></h3>
+      <div class="scroll"><table class="t"><thead><tr><th>名稱</th><th>預設倉儲</th><th class="r">訂單數</th><th>狀態</th><th>專屬連結</th><th></th></tr></thead><tbody>
+      ${d.staff.map(u => `<tr><td>${esc(u.name)}</td><td>${esc((d.locations.find(l => l.id === u.locationId) || {}).name || '—')}</td><td class="r n">${fmtN(u.orders)}</td>
+        <td>${u.active ? '<span class="tag ok">啟用</span>' : '<span class="tag red">停用</span>'}</td>
+        <td>${su ? `<button class="btn sm line" data-cp="${esc(link(u))}">複製連結</button>` : '<span class="faint" style="font-size:13px">到「系統」填入銷售頁網址後可用</span>'}</td>
+        <td class="r"><button class="btn sm line" data-eu="${esc(u.id)}">編輯</button></td></tr>`).join('') || '<tr><td colspan="6" class="faint" style="text-align:center;padding:40px">還沒有人員</td></tr>'}
+      </tbody></table></div>
+      <p class="note">專屬連結會直接用該人員登入，傳給他用手機打開並「加入主畫面」，之後永遠不用再選名字。停用後，他的手機會回到選名字畫面，過去訂單保留。</p>
+    </div>
+    <div class="box"><h3>管理者<span class="sp"></span><span class="lab">Google 帳號</span></h3>
+      ${d.admins.map(e => `<div class="linkrow"><span style="flex:1">${esc(e)}${e === d.owner ? ' <span class="tag ac">擁有者</span>' : ''}${e === d.me.email ? ' <span class="tag">你</span>' : ''}</span>${e !== d.owner && e !== d.me.email ? `<button class="btn sm danger" data-rm="${esc(e)}">移除</button>` : ''}</div>`).join('')}
+      <div class="row" style="margin-top:18px"><input class="inp" id="ae" type="email" placeholder="name@gmail.com" style="max-width:360px"><button class="btn pri" id="addA">加入管理者</button></div>
+      <p class="note">加入後，系統會把試算表與 PDF 資料夾共用給這個帳號（編輯權限）。對方用自己的 Google 帳號開啟後台網址即可，第一次需要按「允許」授權。</p>
+    </div>`;
+  $('#addU').onclick = () => staffEditor();
+  $$('[data-eu]').forEach(b => b.onclick = () => staffEditor(d.staff.find(u => u.id === b.dataset.eu)));
+  $$('[data-cp]').forEach(b => b.onclick = () => copy(b.dataset.cp));
+  $$('[data-rm]').forEach(b => b.onclick = async () => { if (await confirmBox('移除管理者？', `${b.dataset.rm} 將無法進入後台，也會取消試算表共用。`, '移除', true)) act(() => api('apiRemoveAdmin', b.dataset.rm), '已移除'); });
+  $('#addA').onclick = () => { const e = $('#ae').value.trim(); if (!e) return; act(() => api('apiAddAdmin', e), '已加入並共用試算表'); };
+}
+async function copy(t) { try { await navigator.clipboard.writeText(t); toast('已複製'); } catch (e) { modal({ title: '請手動複製', body: `<textarea class="inp" readonly style="min-height:80px">${esc(t)}</textarea>` }); } }
+function staffEditor(u) {
+  const isNew = !u; u = u || { name: '', locationId: A.d.settings.defaultLocationId, active: true };
+  let active = u.active;
+  const m = modal({ title: isNew ? '新增銷售人員' : '編輯銷售人員',
+    body: `<label class="field"><span>名稱（手機上顯示的名字）</span><input class="inp" id="un" value="${esc(u.name)}" placeholder="例：小安"></label>
+      <label class="field"><span>預設出貨倉儲</span><select class="inp" id="ul">${A.d.locations.map(l => `<option value="${esc(l.id)}" ${l.id === u.locationId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>
+      <div class="togrow" style="border-top:1px solid var(--line)"><div>啟用<small>停用後無法登記，過去的訂單仍保留</small></div><button class="sw ${active ? 'on' : ''}" id="ua" type="button"></button></div>`,
+    foot: `${isNew ? '' : '<button class="btn danger" id="del">刪除</button>'}<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
+  const sw = $('#ua', m); sw.onclick = () => { active = !active; sw.classList.toggle('on', active); };
+  $('#ok', m).onclick = async () => { try { await act(() => api('apiSaveStaff', { id: u.id, name: $('#un', m).value, locationId: $('#ul', m).value, active }), '已儲存'); m.close(); } catch (e) {} };
+  const del = $('#del', m); if (del) del.onclick = async () => { if (await confirmBox('刪除人員？', '已有訂單的人員無法刪除，請改為停用。', '刪除', true)) { try { await act(() => api('apiDeleteStaff', u.id), '已刪除'); m.close(); } catch (e) {} } };
+}
+
+/* ---- 銷售 App（手機畫面全部在這裡調整，右側即時預覽） ---- */
+function vAppSet() {
+  const d = A.d, s0 = d.settings;
+  const dr = JSON.parse(JSON.stringify(s0)); dr.show = { ...s0.show };
+  const SW = ['#E74118', '#111111', '#2F5BD3', '#2E7D4F', '#A15C00', '#7A3FB0'];
+  const tg = (k, t, sub, path = '') => { const v = path ? dr[path][k] : dr[k]; return `<div class="togrow"><div>${t}<small>${sub}</small></div><button class="sw ${v ? 'on' : ''}" data-tg="${k}" data-path="${path}" type="button"></button></div>`; };
+  $('#am').innerHTML = head('銷售 App', '銷售 App', '手機上看到的內容都在這裡調整，右邊是即時預覽。品項按鈕在「品項與組合」，場次與目標在「活動與目標」，介紹 PDF 在「簡介資料」。', '<button class="btn pri" id="save">儲存並套用到手機</button>')
+    + `<div class="appset"><div>
+      <div class="box"><h3>外觀</h3>
+        <div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap;margin-top:18px">
+          <div><div class="lab" style="margin-bottom:8px">Logo</div><label class="imgbox" id="lg" style="width:220px;aspect-ratio:3/1;border-style:dashed;background:#fff;padding:14px">${`<img src="${esc(dr.logo || LOGO)}" alt="">`}<input type="file" accept="image/\x2a" hidden id="lgf"></label>
+            <div class="row" style="margin-top:8px"><span class="lab">${dr.logo ? '自訂' : '預設 -ish logo'}</span>${dr.logo ? '<button class="btn sm line" id="lgx">還原預設</button>' : ''}</div></div>
+          <div style="flex:1;min-width:240px">
+            <label class="field"><span>App 名稱</span><input class="inp" data-k="appName" value="${esc(dr.appName)}"></label>
+            <div class="lab" style="margin-bottom:10px">主色（進度、選取、重點數字）</div>
+            <div class="swatches">${SW.map(c => `<button class="swatch ${c.toLowerCase() === String(dr.accent).toLowerCase() ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}<input type="color" id="cc" value="${esc(dr.accent)}" style="width:40px;height:30px;border:0;background:none;padding:0;margin-left:6px"></div>
+          </div>
+        </div>
+        <label class="field" style="margin-top:20px"><span>首頁公告（可換行）</span><textarea class="inp" data-k="announcement" placeholder="例：2 隻組 NT$2,500，亮面霧面可混搭。">${esc(dr.announcement)}</textarea></label>
+      </div>
+      <div class="box"><h3>首頁顯示</h3>
+        ${tg('today', '今日場次與進度', '場次名稱、日期、公告、今日目標', 'show')}
+        ${tg('stats', '數字列', '今日售出、今日營收、預購登記', 'show')}
+        ${tg('stock', '品項上的庫存數字', '關閉後只顯示價格', 'show')}
+        ${tg('progress', '「我」頁的活動進度', '總目標與每日售出長條', 'show')}
+      </div>
+      <div class="box"><h3>銷售規則</h3><div style="height:14px"></div>
+        <label class="field"><span>付款方式（一行一種，順序即手機上的順序；綠界掃碼在「系統」開啟後會自動加在最後）</span><textarea class="inp" id="pays">${esc((dr.payments || []).join('\n'))}</textarea></label>
+        <label class="field"><span>哪一個付款方式要跳出「現金收款＋找零」視窗</span><select class="inp" id="cashN">${(dr.payments || []).map(p => `<option ${p === dr.cashName ? 'selected' : ''}>${esc(p)}</option>`).join('')}<option value="" ${dr.cashName ? '' : 'selected'}>（不使用）</option></select></label>
+        ${tg('staffEdit', '銷售人員可修改／刪除自己的訂單', '在手機「我」的訂單列表操作；後台會標示「已修改」並保留刪除紀錄')}
+        ${tg('allowPriceEdit', '允許銷售端修改單價', '確認畫面可以改價（打折、議價）')}
+        ${tg('allowPreorder', '允許預購登記', '現貨不足時自動轉為預購，不計入售出')}
+        ${tg('preorderPaid', '預購於登記時收款', '開啟：本次收款含預購；關閉：只收現貨')}
+        ${tg('preorderContact', '預購需填客人姓名或電話', '方便之後通知取貨')}
+        ${tg('preorderAddress', '預購地址必填', '關閉時地址欄仍會顯示，但可以不填')}
+      </div>
+    </div>
+    <div><div class="phonebox"><div class="scr" id="pv"></div></div><p class="lab phonecap">即時預覽</p></div></div>`;
+  const pv = () => {
+    setAccent(dr.accent);
+    const today = dKey(Date.now());
+    const sess = d.sessions.find(s => s.date === today) || d.sessions[0] || null;
+    const ps = d.products.filter(p => p.active).slice(0, 4);
+    $('#pv').innerHTML = `<div class="m" style="padding-bottom:30px">${headerHTML(dr, (d.staff[0] || { name: '店長' }).name)}
+      ${dr.show.today ? heroHTML({ st: dr, sess, sold: 86, target: sess ? sess.target : 0, locName: (d.locations[0] || {}).name, today }) : ''}
+      ${dr.show.stats ? statsHTML({ st: dr, t: { units: 86, revenue: 112400, pre: 6, myOrders: 12 } }) : ''}
+      <div class="sec"><h2>品項</h2><span class="lab">${ps.length} items</span></div><div class="grid">${ps.map((p, i) => tileHTML(p, { st: dr, qty: i === 0 ? 2 : 0, stock: i === 1 ? 0 : stockTotal(d.stock, p.id) })).join('')}</div></div>`;
+  };
+  pv();
+  $$('[data-k]').forEach(i => i.oninput = () => { dr[i.dataset.k] = i.value; pv(); });
+  $$('[data-tg]').forEach(b => b.onclick = () => { const k = b.dataset.tg, p = b.dataset.path; if (p) dr[p][k] = !dr[p][k]; else dr[k] = !dr[k]; b.classList.toggle('on'); pv(); });
+  $$('[data-c]').forEach(b => b.onclick = () => { dr.accent = b.dataset.c; $('#cc').value = b.dataset.c; $$('[data-c]').forEach(x => x.classList.toggle('on', x === b)); pv(); });
+  $('#cc').oninput = e => { dr.accent = e.target.value; $$('[data-c]').forEach(x => x.classList.remove('on')); pv(); };
+  $('#pays').oninput = e => { dr.payments = e.target.value.split('\n').map(x => x.trim()).filter(Boolean); };
+  $('#cashN').onchange = e => { dr.cashName = e.target.value; };
+  let logo;
+  $('#lgf').onchange = async e => { try { logo = dr.logo = await processImage(e.target.files[0], false); $('#lg img').src = logo; pv(); } catch (er) { toast(er.message, 'err'); } };
+  const lx = $('#lgx'); if (lx) lx.onclick = () => { logo = dr.logo = ''; $('#lg img').src = LOGO; lx.remove(); pv(); };
+  $('#save').onclick = () => {
+    const out = {}; ['appName', 'announcement', 'accent', 'show', 'payments', 'cashName', 'staffEdit', 'allowPriceEdit', 'allowPreorder', 'preorderPaid', 'preorderContact', 'preorderAddress'].forEach(k => out[k] = dr[k]);
+    if (logo !== undefined) out.logo = logo;
+    act(() => api('apiSaveSettings', out), '已儲存，手機重新整理後套用');
+  };
+}
+
+/* ---- 簡介資料 ---- */
+function vMaterials() {
+  const d = A.d;
+  $('#am').innerHTML = head('簡介資料', '簡介資料', '銷售人員在手機「介紹」頁看到的 PDF。依檔名排序，檔名前加 01_、02_ 可以控制順序。', d.links.folder ? `<a class="btn line" href="${esc(d.links.folder)}" target="_blank" rel="noopener">開啟 Drive 資料夾 ↗</a>` : '')
+    + `<label class="drop" id="dz"><b>把 PDF 拖到這裡</b>或點擊選擇檔案 · 單檔 25 MB 以內<input type="file" accept="application/pdf" multiple hidden id="pf"></label>
+    <div class="box" style="margin-top:36px"><h3>QR code<span class="sp"></span><button class="btn sm pri" id="addQ">＋ 新增 QR code</button></h3>
+      <p class="note">顯示在手機「介紹」頁最上方，點開可以放大給客人掃。填連結會自動產生 QR code，也可以直接上傳 QR 圖片（例如 LINE 官方帳號的 QR）。</p>
+      ${d.qrs.length ? `<table class="t"><thead><tr><th style="width:70px"></th><th>標題</th><th>連結</th><th>顯示</th><th>順序</th><th></th></tr></thead><tbody>
+        ${d.qrs.map((q, i) => `<tr><td><div class="qrbox" style="width:56px" data-aq="${esc(q.id)}"></div></td><td>${esc(q.title)}<br><span class="faint" style="font-size:13px">${esc(q.note)}</span></td><td class="faint" style="word-break:break-all;font-size:13px">${q.image ? '（上傳的圖片）' : esc(q.url)}</td>
+          <td>${q.active ? '<span class="tag ok">顯示</span>' : '<span class="tag">隱藏</span>'}</td>
+          <td style="white-space:nowrap"><button class="btn sm ghost" data-qm="${i},-1" ${i ? '' : 'disabled'}>↑</button><button class="btn sm ghost" data-qm="${i},1" ${i < d.qrs.length - 1 ? '' : 'disabled'}>↓</button></td>
+          <td class="r"><button class="btn sm line" data-qe="${esc(q.id)}">編輯</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">還沒有 QR code</p>'}
+    </div>
+    <div class="box"><h3>檔案<span class="sp"></span><span class="lab">${d.materials.length} files</span></h3><table class="t"><thead><tr><th>檔名</th><th class="r">大小</th><th>更新</th><th></th></tr></thead><tbody>
+    ${d.materials.map(x => `<tr><td><div class="row"><span class="lab" style="color:var(--ac)">PDF</span>${esc(x.name)}</div></td><td class="r n faint">${fmtSize(x.size)}</td><td class="n faint">${fmtDT(x.updated)}</td>
+      <td class="r" style="white-space:nowrap"><button class="btn sm line" data-pv="${esc(x.id)}">預覽</button> <button class="btn sm line" data-rn="${esc(x.id)}">改名</button> <button class="btn sm danger" data-dl="${esc(x.id)}">刪除</button></td></tr>`).join('') || '<tr><td colspan="4" class="faint" style="text-align:center;padding:40px">還沒有檔案</td></tr>'}
+    </tbody></table></div>`;
+  const dz = $('#dz'), pf = $('#pf');
+  const up = async files => {
+    for (const f of files) {
+      if (!/pdf$/i.test(f.type) && !/\.pdf$/i.test(f.name)) { toast(f.name + ' 不是 PDF', 'err'); continue; }
+      if (f.size > 25 * 1048576) { toast(f.name + ' 超過 25 MB，請先壓縮', 'err'); continue; }
+      toast('上傳中：' + f.name);
+      const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(f); });
+      try { await act(() => api('apiUploadMaterial', f.name, b64), '已上傳 ' + f.name); } catch (e) {}
+    }
+  };
+  pf.onchange = () => up([...pf.files]);
+  dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
+  dz.ondragleave = () => dz.classList.remove('over');
+  dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); up([...e.dataTransfer.files]); };
+  const find = id => d.materials.find(x => x.id === id);
+  $$('[data-pv]').forEach(b => b.onclick = () => openViewer(find(b.dataset.pv), '__admin__'));
+  d.qrs.forEach(q => { const el = document.querySelector(`[data-aq="${CSS.escape(q.id)}"]`); if (q.image) el.innerHTML = `<img src="${esc(q.image)}" alt="">`; else fillQr(el, q.url); });
+  $('#addQ').onclick = () => qrEditor();
+  $$('[data-qe]').forEach(b => b.onclick = () => qrEditor(d.qrs.find(q => q.id === b.dataset.qe)));
+  $$('[data-qm]').forEach(b => b.onclick = () => { const [i, dd] = b.dataset.qm.split(',').map(Number); const ids = d.qrs.map(q => q.id); [ids[i], ids[i + dd]] = [ids[i + dd], ids[i]]; act(() => api('apiSaveOrder', 'qrcodes', ids)); });
+  $$('[data-rn]').forEach(b => b.onclick = () => {
+    const x = find(b.dataset.rn);
+    const m = modal({ title: '改名', body: `<input class="inp" id="nn" value="${esc(x.name)}">`, foot: `<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
+    $('#ok', m).onclick = async () => { try { await act(() => api('apiRenameMaterial', x.id, $('#nn', m).value), '已改名'); m.close(); } catch (e) {} };
+  });
+  $$('[data-dl]').forEach(b => b.onclick = async () => { const x = find(b.dataset.dl); if (await confirmBox('刪除檔案？', `「${x.name}」會移到 Google Drive 垃圾桶，30 天內可以還原。`, '刪除', true)) act(() => api('apiDeleteMaterial', x.id), '已刪除'); });
+}
+
+function qrEditor(q) {
+  const isNew = !q; q = q || { title: '', note: '', url: '', image: '', active: true };
+  let image = q.image, active = q.active;
+  const m = modal({ title: isNew ? '新增 QR code' : '編輯 QR code',
+    body: `<label class="field"><span>標題</span><input class="inp" id="qt" value="${esc(q.title)}" placeholder="例：Instagram、官方 LINE、品牌官網"></label>
+      <label class="field"><span>說明（選填）</span><input class="inp" id="qn" value="${esc(q.note)}" placeholder="例：追蹤新品消息"></label>
+      <label class="field"><span>連結（自動產生 QR code）</span><input class="inp" id="qu" value="${esc(q.url)}" placeholder="https:\/\/"></label>
+      <div class="lab" style="margin:4px 0 10px">或上傳 QR 圖片（有圖片時優先使用）</div>
+      <div class="row" style="align-items:flex-start;gap:16px"><label class="imgbox" id="qi" style="width:140px">${image ? `<img src="${esc(image)}" alt="">` : '上傳圖片'}<input type="file" accept="image/\x2a" hidden id="qf"></label>
+        <div><div class="qrbox" id="qp" style="width:140px"></div><p class="lab" style="margin-top:6px">預覽</p></div></div>
+      ${image ? '<button class="btn sm line" id="qx" style="margin-top:10px">移除圖片</button>' : ''}
+      <div class="togrow" style="margin-top:16px;border-top:1px solid var(--line)"><div>顯示在手機介紹頁</div><button class="sw ${active ? 'on' : ''}" id="qa" type="button"></button></div>`,
+    foot: `${isNew ? '' : '<button class="btn danger" id="del">刪除</button>'}<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ok">儲存</button>` });
+  const pv = () => { const el = $('#qp', m); if (image) el.innerHTML = `<img src="${esc(image)}" alt="">`; else if ($('#qu', m).value.trim()) fillQr(el, $('#qu', m).value.trim()); else el.innerHTML = ''; };
+  pv();
+  $('#qu', m).oninput = () => { clearTimeout(m._t); m._t = setTimeout(pv, 300); };
+  $('#qf', m).onchange = async e => { try { image = await processImage(e.target.files[0]); $('#qi', m).innerHTML = `<img src="${image}" alt="">`; $('#qi', m).appendChild($('#qf', m) || e.target); pv(); } catch (er) { toast(er.message, 'err'); } };
+  const qx = $('#qx', m); if (qx) qx.onclick = () => { image = ''; $('#qi img', m) && $('#qi img', m).remove(); qx.remove(); pv(); };
+  const sw = $('#qa', m); sw.onclick = () => { active = !active; sw.classList.toggle('on', active); };
+  $('#ok', m).onclick = async () => { try { await act(() => api('apiSaveQr', { id: q.id, title: $('#qt', m).value, note: $('#qn', m).value, url: $('#qu', m).value, image, active }), '已儲存'); m.close(); } catch (e) {} };
+  const del = $('#del', m); if (del) del.onclick = async () => { if (await confirmBox('刪除 QR code？', `「${q.title}」會從介紹頁移除。`, '刪除', true)) { try { await act(() => api('apiDeleteQr', q.id), '已刪除'); m.close(); } catch (e) {} } };
+}
+
+/* ---- 系統 ---- */
+function vSystem() {
+  const d = A.d, s = d.settings, L = d.links, ec = d.ecpay;
+  let mode = ec.mode, on = s.ecpayEnabled;
+  $('#am').innerHTML = head('系統', '系統', '資料都存在 ishgoodsservice@gmail.com 的 Google 試算表與 Drive。')
+    + `<div class="cols2">
+      <div class="box"><h3>網址</h3><div style="height:16px"></div>
+        <label class="field"><span>網站網址（銷售頁）</span><input class="inp" id="su" value="${esc(s.salesUrl)}" placeholder="${esc(SITE)}"></label>
+        <label class="field"><span>資料接口網址（Apps Script 部署，…/exec）</span><input class="inp" id="apiu" value="${esc(s.apiUrl)}" placeholder="${esc(API)}"></label>
+        <div class="linkrow"><span style="width:110px">後台網址</span><code>${esc(siteUrl(s) + '?page=admin')}</code></div>
+        ${!s.salesUrl || /script\.google\.com/.test(s.salesUrl) || !s.apiUrl ? '<p class="note"><b style="color:var(--red)">網址還沒設定完成，</b>按「填入目前網址」再儲存即可。</p>' : ''}
+        <p class="note">網站網址用在：人員專屬連結、綠界付款 QR code。資料接口網址用來接收綠界付款結果通知。</p>
+        <button class="btn line sm" id="fillUrl" type="button">填入目前網址</button>
+        <h3 style="font-size:18px;margin:30px 0 8px">庫存</h3>
+        <div class="two"><label class="field"><span>低庫存提醒</span><input class="inp n" id="low" type="number" value="${esc(s.lowStock)}"></label>
+        <label class="field"><span>新人員預設倉儲</span><select class="inp" id="dloc">${d.locations.map(l => `<option value="${esc(l.id)}" ${l.id === s.defaultLocationId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label></div>
+        <button class="btn pri" id="save">儲存</button>
+      </div>
+      <div class="box"><h3>綠界掃碼付款<span class="sp"></span>${on ? `<span class="tag ${mode === 'prod' ? 'ok' : 'amb'}">${mode === 'prod' ? '正式環境' : '測試環境'}</span>` : '<span class="tag">未啟用</span>'}</h3>
+        <div class="togrow"><div>啟用綠界掃碼付款<small>銷售端選這個付款方式時，登記後顯示 QR code 讓客人掃碼付款，付款完成自動標記「已付款」</small></div><button class="sw ${on ? 'on' : ''}" id="ecOn" type="button"></button></div>
+        <div style="height:16px"></div>
+        <label class="field"><span>付款方式名稱（顯示在手機上）</span><input class="inp" id="ecName" value="${esc(s.ecpayName)}"></label>
+        <div class="lab" style="margin-bottom:8px">環境</div>
+        <div class="seg" id="ecMode" style="margin-bottom:16px"><button data-m="stage" class="${mode === 'stage' ? 'on' : ''}">測試（不會扣款）</button><button data-m="prod" class="${mode === 'prod' ? 'on' : ''}">正式</button></div>
+        <label class="field"><span>特店編號 MerchantID</span><input class="inp" id="ecMid" value="${esc(ec.mid)}" autocomplete="off"></label>
+        <div class="two"><label class="field"><span>HashKey</span><input class="inp" id="ecKey" type="password" autocomplete="new-password" placeholder="${ec.hasKey ? '已設定（留空不變更）' : '尚未設定'}"></label>
+        <label class="field"><span>HashIV</span><input class="inp" id="ecIv" type="password" autocomplete="new-password" placeholder="${ec.hasIv ? '已設定（留空不變更）' : '尚未設定'}"></label></div>
+        <div class="row" style="flex-wrap:wrap"><button class="btn pri" id="ecSave">儲存綠界設定</button><button class="btn line" id="ecTest">填入綠界文件的測試帳號</button></div>
+        <p class="note">金鑰只存在 Apps Script 的私密設定，不會寫進試算表。付款結果通知網址（ReturnURL）會使用上方的「資料接口網址」。${s.salesUrl && s.apiUrl ? '' : '<b style="color:var(--red)">請先填入網站網址與資料接口網址。</b>'}<br>建議先用測試環境完整跑一次，再切換到正式並填入綠界特店後台的正式金鑰。</p>
+      </div>
+    </div>
+    <div class="box" style="max-width:860px"><h3>資料位置</h3>
+      ${[['Google 試算表', L.sheet], ['PDF 資料夾', L.folder]].map(([t, u]) => `<div class="linkrow"><span style="width:110px">${t}</span><code>${esc(u || '—')}</code>${u ? `<a class="btn sm line" href="${esc(u)}" target="_blank" rel="noopener">開啟 ↗</a>` : ''}</div>`).join('')}
+    </div>`;
+  $('#fillUrl').onclick = () => { $('#su').value = SITE; if (API) $('#apiu').value = API; toast('已填入，請按儲存'); };
+  $('#save').onclick = () => act(() => { const su = $('#su').value.trim(); return api('apiSaveSettings', { salesUrl: su, adminUrl: su ? su + (su.includes('?') ? '&' : '?') + 'page=admin' : '', apiUrl: $('#apiu').value.trim(), lowStock: Number($('#low').value) || 0, defaultLocationId: $('#dloc').value }); }, '已儲存');
+  const sw = $('#ecOn'); sw.onclick = () => { on = !on; sw.classList.toggle('on', on); };
+  $$('#ecMode button').forEach(b => b.onclick = () => { mode = b.dataset.m; $$('#ecMode button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#ecTest').onclick = () => { mode = 'stage'; $$('#ecMode button').forEach(x => x.classList.toggle('on', x.dataset.m === 'stage')); $('#ecMid').value = '3002607'; $('#ecKey').value = 'pwFHCqoQZGmho4w6'; $('#ecIv').value = 'EkRm7iFT261dpevs'; toast('已填入測試值，請按儲存'); };
+  $('#ecSave').onclick = async () => {
+    if (mode === 'prod' && !await confirmBox('切換到正式環境？', '之後客人掃碼會真的扣款。請確認特店編號與金鑰都是綠界正式環境的值。', '切換')) return;
+    act(async () => { await api('apiSaveEcpay', { mode, mid: $('#ecMid').value, key: $('#ecKey').value, iv: $('#ecIv').value }); return api('apiSaveSettings', { ecpayEnabled: on, ecpayName: $('#ecName').value.trim() || '綠界掃碼' }); }, '綠界設定已儲存');
+  };
+}
+
+/* ============================================================
+ * 預覽模式：在瀏覽器裡跑同一份 Code.gs（模擬試算表）
+ * ============================================================ */
+const Demo = {
+  ready: false,
+  call(name, args) {
+    if (!this.ready) { window.seedDemo && window.seedDemo(); this.ready = true; }
+    return new Promise((res, rej) => setTimeout(() => {
+      const r = window.apiCall_({ fn: name, args: JSON.parse(JSON.stringify(args)) }, 'ishgoodsservice@gmail.com');
+      if (r.ok) res(JSON.parse(JSON.stringify(r.data))); else rej(new Error(r.error));
+    }, 100));
+  },
+};
+
+/* ============================================================
+ * 進入點
+ * ============================================================ */
+const route = page => page === 'admin' ? startAdmin() : startSell();
+const standalone = () => {
+  app.innerHTML = `<div class="center"><div style="width:min(520px,100%)">${logoHTML(null, 22)}
+    <h1 style="font-size:34px;margin:40px 0 14px">網站還沒連到資料</h1>
+    <p class="muted" style="margin:0 0 18px">請在 index.html 開頭的 <code>ISH_CONFIG.api</code> 填入 Apps Script 的部署網址（…/exec）。</p>
+    <div class="spec" style="border-top:1px solid var(--ink)"><span>想先看看畫面</span><span>打開同資料夾的「本機預覽.html」</span></div>
+    <div class="spec"><span>正式使用</span><span>照「部署說明.md」設定</span></div>
+  </div></div>`;
+};
+if (REMOTE) {
+  URLP = Object.fromEntries(new URLSearchParams(location.search));
+  if (URLP.pay) startPay(URLP.pay); else route(URLP.page || 'sell');
+} else if (typeof window.seedDemo !== 'function') {
+  standalone();
+} else {
+  const go2 = () => {
+    const page = location.hash === '#admin' ? 'admin' : 'sell';
+    document.querySelectorAll('.ov,.viewer').forEach(x => x.remove());
+    route(page);
+    let bar = document.querySelector('.demo');
+    if (!bar) { bar = document.createElement('div'); bar.className = 'demo'; document.body.insertBefore(bar, app); }
+    bar.innerHTML = `<span>PREVIEW · 示範資料</span><a href="#sell" class="${page === 'sell' ? 'on' : ''}">手機銷售頁</a><a href="#admin" class="${page === 'admin' ? 'on' : ''}">電腦後台</a>`;
+  };
+  window.addEventListener('hashchange', go2);
+  go2();
+}
+}
+</script>
+</body>
+</html>
