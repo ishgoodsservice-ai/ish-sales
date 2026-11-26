@@ -1127,7 +1127,7 @@ a{color:inherit}a.btn{text-decoration:none}
 h1,h2,h3{font-weight:500;letter-spacing:-.025em;margin:0}
 
 /* controls */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid var(--ink);background:#fff;font-weight:500;white-space:nowrap;font-size:14px}
+.btn{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid var(--ink);background:#fff;font-weight:500;white-space:nowrap;font-size:14px}
 .btn:hover{background:var(--soft)}
 .btn.pri{background:var(--ink);color:#fff}.btn.pri:hover{background:#000}
 .btn.ac{background:var(--ac);border-color:var(--ac);color:#fff}
@@ -1179,18 +1179,22 @@ textarea.inp{min-height:96px;resize:vertical;line-height:1.5}
 .dlg.wide{width:min(760px,100%)}
 .dlg-h{display:flex;align-items:center;gap:10px;padding:20px 24px;border-bottom:1px solid var(--line)}
 .dlg-h h3{font-size:20px;flex:1}
-.dlg-b{padding:18px 24px;overflow:auto;flex:1}
+.dlg-b{padding:18px 24px;overflow:auto;flex:1 1 auto;min-height:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.dlg-h,.dlg-f{flex:none}
 .dlg-f{display:flex;gap:10px;padding:16px 24px calc(16px + env(safe-area-inset-bottom));border-top:1px solid var(--line);align-items:center}
 .dlg-f .btn{flex-shrink:0}
+.dlg-f .btn.lg{width:auto;flex:1 1 auto}
 .day{border-top:1px solid var(--ink);margin-top:14px}
 .day>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;padding:12px 0;font:500 11.5px/1.4 var(--mono);letter-spacing:.04em;color:var(--ink2)}
 .day>summary::-webkit-details-marker{display:none}
 .day>summary .n{font:400 15px var(--sans);color:var(--ink)}
 .day[open]>summary{border-bottom:1px solid var(--line)}
-.x{width:38px;height:38px;border:1px solid var(--line2);background:#fff;font-size:20px;line-height:1}
+html.lock,html.lock body{overflow:hidden}
+.x{width:38px;height:38px;flex:none;border:1px solid var(--line2);background:#fff;font-size:20px;line-height:1}
 @media (max-width:640px){
   .ov{align-items:flex-end}
-  .dlg,.dlg.wide{width:100%;height:auto;max-height:94vh;animation:up .22s cubic-bezier(.2,.8,.2,1)}
+  .ov{height:100vh;height:100dvh}
+  .dlg,.dlg.wide{width:100%;height:auto;max-height:calc(100vh - 40px);max-height:calc(100dvh - 12px - env(safe-area-inset-top));animation:up .22s cubic-bezier(.2,.8,.2,1)}
 }
 @keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(50px)}}@keyframes side{from{transform:translateX(40px);opacity:.5}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -1263,10 +1267,10 @@ textarea.inp{min-height:96px;resize:vertical;line-height:1.5}
 .minibars .b.future{background:transparent;border:1px dashed var(--line2);border-bottom:0}
 .minibars .tg{position:absolute;left:-5px;right:-5px;border-top:1px dashed var(--ink)}
 .mlabels{display:flex;gap:10px;margin-top:8px}.mlabels span{flex:1;text-align:center}
-.line{padding:16px 0;border-bottom:1px solid var(--line)}
-.line .top{display:flex;align-items:baseline;gap:10px}
-.line .nm{font-weight:500;flex:1;font-size:16px}
-.line .ctl{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.cline{padding:16px 0;border-bottom:1px solid var(--line)}
+.cline .top{display:flex;align-items:baseline;gap:10px}
+.cline .nm{font-weight:500;flex:1;font-size:16px}
+.cline .ctl{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
 .pr{width:104px;min-height:40px;padding:6px 10px;text-align:right}
 .grand{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 4px}
 .grand .n{font-size:34px;font-weight:300;letter-spacing:-.03em}
@@ -1384,7 +1388,7 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 @media (max-width:860px){
   .a{grid-template-columns:1fr}
   .a-side{position:sticky;height:auto;flex-direction:row;overflow-x:auto;padding:12px 8px;z-index:20;border-right:0;border-bottom:1px solid var(--line);align-items:center}
-  .a-side .logo{margin:0 14px}.a-side .me{display:none}.nav{width:auto;white-space:nowrap;padding:0 12px}
+  .a-side .logo{margin:0 14px;flex:none;--lh:13px}.a-side .me{display:none}.nav{width:auto;flex:none;white-space:nowrap;padding:0 12px}
   .ed2{flex-direction:column}.two{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{border-left:0;padding-left:0}
 }
 .demo{display:flex;align-items:center;justify-content:center;gap:4px;background:var(--ink);color:#fff;padding:6px 10px;flex-wrap:wrap}
@@ -1392,6 +1396,7 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .demo a{padding:5px 14px;text-decoration:none;color:#fff;font-size:13px}
 .demo a.on{background:#fff;color:var(--ink)}
 .demo+#app .a-side{height:calc(100vh - 40px)}
+@media (max-width:860px){.demo+#app .a-side{height:auto}}
 </style>
 </head>
 <body>
@@ -1495,11 +1500,12 @@ function modal({ title, body, foot = '', wide = false }) {
   const ov = document.createElement('div');
   ov.className = 'ov';
   ov.innerHTML = `<div class="dlg ${wide ? 'wide' : ''}" role="dialog" aria-modal="true"><div class="dlg-h"><h3>${esc(title)}</h3><button class="x" data-close aria-label="關閉">×</button></div><div class="dlg-b">${body}</div>${foot ? `<div class="dlg-f">${foot}</div>` : ''}</div>`;
-  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); ov.onclose && ov.onclose(); };
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); if (!document.querySelector('.ov')) document.documentElement.classList.remove('lock'); ov.onclose && ov.onclose(); };
   const onKey = e => { if (e.key === 'Escape' && [...document.querySelectorAll('.ov')].pop() === ov) close(); };
   ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(ov);
+  document.documentElement.classList.add('lock');
   ov.close = close;
   return ov;
 }
@@ -1829,7 +1835,7 @@ function checkoutSheet({ cart, sets, form, title = '確認銷售', submitLabel =
     if (!cart.length && !editing) { m.close(); return; }
     const { pr, rev, pre, hasPre, collect } = calc(), sess = curSession();
     $('#co', m).innerHTML = pr.lines.map((l, i) => { const p = M.data.products.find(x => x.id === l.productId) || { name: l.productId, spec: '' };
-      return `<div class="line"><div class="top"><span class="nm">${esc(pname(p))}</span><span class="n">${money(l.net)}</span></div>
+      return `<div class="cline"><div class="top"><span class="nm">${esc(pname(p))}</span><span class="n">${money(l.net)}</span></div>
         <div class="ctl"><div class="step"><button data-d="-1" data-i="${i}">−</button><span class="n">${l.qty}</span><button data-d="1" data-i="${i}">+</button></div>
         ${st.allowPreorder ? `<div class="seg"><button data-k="現貨" data-i="${i}" class="${l.kind === '現貨' ? 'on' : ''}">現貨</button><button data-k="預購" data-i="${i}" class="${l.kind === '預購' ? 'on' : ''}">預購</button></div>` : ''}
         <span class="sp"></span>${st.allowPriceEdit ? `<input class="inp pr n" type="number" inputmode="numeric" data-p="${i}" value="${l.price}" aria-label="單價">` : `<span class="lab n">@ ${money(l.price)}</span>`}</div></div>`; }).join('')
@@ -2367,12 +2373,12 @@ function vDash() {
       ${ss.length ? `<div class="scroll"><table class="t daily"><thead><tr><th>日期</th><th style="min-width:150px">場次</th><th class="r">預估售出<br>（${esc(unit)}）</th>
         ${cols.map(x => `<th class="r" title="${esc(pname(x))}">${esc(prodLabel(x, cols))}<br>（${esc(unitOf(st, x))}）</th>`).join('')}
         ${bcols.map(b => `<th class="r">其中 ${esc(b.name)}<br>（組）</th>`).join('')}
-        <th class="r">售出合計<br>（${esc(unit)}）</th><th class="r">營收<br>（NT$）</th><th class="r">達成率</th>${st.allowPreorder ? `<th class="r">預購登記<br>（${esc(unit)}）</th>` : ''}<th style="min-width:180px">備註</th></tr></thead><tbody>
+        <th class="r">售出合計<br>（${esc(unit)}）</th><th class="r">營收<br>（NT$）</th><th class="r">達成率</th>${st.allowPreorder ? `<th class="r">預購登記<br>（${esc(unit)}）</th>` : ''}<th style="min-width:240px">備註</th></tr></thead><tbody>
         ${rows.map(r => `<tr${r.s.date === today ? ' style="font-weight:500"' : ''}><td class="n">${md(r.s.date)}${r.s.date === today ? ' <span class="tag ac">今天</span>' : ''}</td><td>${esc(r.s.name)}</td>
           <td class="ed"><input class="r n" type="number" data-st="${esc(r.s.id)}" value="${r.s.target}"></td>
           ${r.per.map(v => c(fmtN(v))).join('')}${r.sets.map(v => c(fmtN(v))).join('')}
           ${c(fmtN(r.units))}${c(fmtN(r.rev))}${c(r.s.target ? pct(r.units, r.s.target) + '%' : '—')}${st.allowPreorder ? c(fmtN(r.pre)) : ''}
-          <td class="ed"><input data-sn="${esc(r.s.id)}" value="${esc(r.s.note)}" placeholder="—"></td></tr>`).join('')}
+          <td class="ed"><input data-sn="${esc(r.s.id)}" value="${esc(r.s.note)}" placeholder="—" style="min-width:230px"></td></tr>`).join('')}
         ${hasOther ? `<tr class="faint"><td></td><td>一般銷售（非場次）</td><td class="r">—</td>${other.per.map(v => c(fmtN(v))).join('')}${other.sets.map(v => c(fmtN(v))).join('')}${c(fmtN(other.units))}${c(fmtN(other.rev))}<td class="r">—</td>${st.allowPreorder ? c(fmtN(other.pre)) : ''}<td></td></tr>` : ''}
         </tbody><tfoot><tr><td></td><td>合計</td>${c(fmtN(tot.target))}${tot.per.map(v => c(fmtN(v))).join('')}${tot.sets.map(v => c(fmtN(v))).join('')}${c(fmtN(tot.units))}${c(fmtN(tot.rev))}${c(tot.target ? pct(tot.units, tot.target) + '%' : '—')}${st.allowPreorder ? c(fmtN(tot.pre)) : ''}<td></td></tr></tfoot></table></div>`
       : '<p class="muted">還沒有活動場次。</p>'}
@@ -2445,13 +2451,13 @@ function vOrders() {
       <select class="inp" id="fc" style="width:auto;min-height:38px;padding:6px 10px;font-size:14px"><option value="">全部收款確認</option><option value="no" ${A.conf === 'no' ? 'selected' : ''}>未確認收款</option><option value="yes" ${A.conf === 'yes' ? 'selected' : ''}>已確認收款</option></select>
       <input class="inp" id="q" placeholder="搜尋品項、人員、客人、裝置…" style="width:260px;min-height:38px;padding:6px 10px;font-size:14px" value="${esc(A.q)}">
     </div>
-    <div class="scroll"><table class="t"><thead><tr><th>時間</th><th>來源</th><th>場次</th><th>品項</th><th class="r">組</th><th class="r">營收</th><th class="r">預購</th><th>付款／收款</th><th>收款確認</th><th>客人／地址／備註</th><th></th></tr></thead><tbody>
-    ${list.slice(0, 600).map(o => `<tr class="${o.status === '作廢' ? 'void' : ''}"><td class="n">${fmtDT(o.time)}<br><span class="lab">${esc(o.orderId)}</span></td>
-      <td>${esc(o.staffName)}<br><span class="lab">${esc(o.device)}</span></td><td>${esc(o.sessionName)}</td>
-      <td>${(itemsBy[o.orderId] || []).map(i => `${esc(i.productName)} <span class="faint n">×${i.qty}</span>${i.kind === '預購' ? ' <span class="tag amb">預購</span>' : ''}`).join('<br>')}</td>
+    <div class="scroll"><table class="t" style="min-width:1240px"><thead><tr><th>時間</th><th>來源</th><th>場次</th><th>品項</th><th class="r">組</th><th class="r">營收</th><th class="r">預購</th><th>付款／收款</th><th>收款確認</th><th style="white-space:nowrap">客人／地址／備註</th><th></th></tr></thead><tbody>
+    ${list.slice(0, 600).map(o => `<tr class="${o.status === '作廢' ? 'void' : ''}"><td class="n" style="white-space:nowrap">${fmtDT(o.time)}<br><span class="lab">${esc(o.orderId)}</span></td>
+      <td>${esc(o.staffName)}<br><span class="lab">${esc(o.device)}</span></td><td style="white-space:nowrap">${esc(o.sessionName)}</td>
+      <td style="white-space:nowrap">${(itemsBy[o.orderId] || []).map(i => `${esc(i.productName)} <span class="faint n">×${i.qty}</span>${i.kind === '預購' ? ' <span class="tag amb">預購</span>' : ''}`).join('<br>')}</td>
       <td class="r n">${Number(o.sets) || ''}</td><td class="r n">${money(o.total)}</td><td class="r n">${Number(o.preorderAmount) ? money(o.preorderAmount) : ''}</td><td style="white-space:nowrap">${esc(o.payment)}${o.payStatus && o.payStatus !== '已收款' ? `<br><span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${o.cashReceived !== '' && o.cashReceived != null ? `<br><span class="lab">實收 ${fmtN(o.cashReceived)}／找 ${fmtN(o.change)}</span>` : ''}</td>
       <td style="white-space:nowrap">${o.status === '作廢' ? '' : o.confirmed ? `<span class="tag ok">已確認</span><br><span class="lab">${esc(o.confirmedBy || '—')}${o.confirmedAt ? ' ' + fmtDT(o.confirmedAt) : ''}</span>` : `<span class="tag amb">未確認</span><br><button class="btn sm line" data-acf="${esc(o.orderId)}" style="margin-top:4px">標記已確認</button>`}</td>
-      <td>${esc([o.customer, o.phone].filter(Boolean).join(' '))}${o.address ? `<br><span class="faint">${esc(o.address)}</span>` : ''}${o.note ? `<br><span class="faint">${esc(o.note)}</span>` : ''}${o.editedAt ? `<br><span class="tag">已修改 ${fmtDT(o.editedAt)}</span>` : ''}</td>
+      <td style="min-width:200px;max-width:300px">${esc([o.customer, o.phone].filter(Boolean).join(' '))}${o.address ? `<br><span class="faint">${esc(o.address)}</span>` : ''}${o.note ? `<br><span class="faint">${esc(o.note)}</span>` : ''}${o.editedAt ? `<br><span class="tag">已修改 ${fmtDT(o.editedAt)}</span>` : ''}</td>
       <td class="r">${o.status === '作廢' ? '<span class="tag">已作廢</span>' : `<button class="btn sm danger" data-void="${esc(o.orderId)}">作廢</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="faint" style="text-align:center;padding:48px">沒有符合的訂單</td></tr>'}
     </tbody></table></div>${list.length > 600 ? '<p class="lab">只顯示最近 600 筆。</p>' : ''}`;
   $$('#rg button').forEach(x => x.onclick = () => { A.range = x.dataset.r; vOrders(); });
@@ -2549,8 +2555,8 @@ function vStock() {
       <td class="r n" style="color:${tot < 0 ? 'var(--red)' : tot <= sf ? 'var(--amb)' : 'inherit'};font-weight:500">${fmtN(tot)}</td><td class="r n faint">${fmtN(sf)}</td></tr>`; }).join('') || `<tr><td colspan="${d.locations.length + 3}" class="faint" style="text-align:center;padding:40px">請先新增品項</td></tr>`}
     </tbody></table></div></div>
     <div class="cols">
-      <div class="box"><h3>庫存異動紀錄<span class="sp"></span><span class="lab">最近 300 筆</span></h3><div style="max-height:460px;overflow:auto"><table class="t"><thead><tr><th>時間</th><th>品項</th><th>位置</th><th class="r">變動</th><th class="r">結存</th><th>原因</th></tr></thead><tbody>
-        ${d.stockLog.map(l => `<tr><td class="n faint">${fmtDT(l.time)}</td><td>${esc(l.productName)}</td><td>${esc(l.locationName)}</td><td class="r n" style="color:${l.delta < 0 ? 'var(--red)' : 'var(--ok)'}">${l.delta > 0 ? '+' : ''}${fmtN(l.delta)}</td><td class="r n">${fmtN(l.balance)}</td><td class="faint">${esc(l.reason)}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">尚無紀錄</td></tr>'}
+      <div class="box"><h3>庫存異動紀錄<span class="sp"></span><span class="lab">最近 300 筆</span></h3><div style="max-height:460px;overflow:auto"><table class="t" style="min-width:560px"><thead><tr><th>時間</th><th>品項</th><th>位置</th><th class="r">變動</th><th class="r">結存</th><th>原因</th></tr></thead><tbody>
+        ${d.stockLog.map(l => `<tr><td class="n faint" style="white-space:nowrap">${fmtDT(l.time)}</td><td style="white-space:nowrap">${esc(l.productName)}</td><td style="white-space:nowrap">${esc(l.locationName)}</td><td class="r n" style="color:${l.delta < 0 ? 'var(--red)' : 'var(--ok)'}">${l.delta > 0 ? '+' : ''}${fmtN(l.delta)}</td><td class="r n">${fmtN(l.balance)}</td><td class="faint">${esc(l.reason)}</td></tr>`).join('') || '<tr><td colspan="6" class="faint">尚無紀錄</td></tr>'}
       </tbody></table></div></div>
       <div class="box"><h3>倉儲位置<span class="sp"></span><button class="btn sm pri" id="addL">＋ 新增</button></h3>
         ${d.locations.map(l => `<div class="linkrow"><span style="flex:1">${esc(l.name)}${l.id === d.settings.defaultLocationId ? ' <span class="tag ac">預設</span>' : ''}<br><span class="faint" style="font-size:13px">${esc(l.note) || '—'}</span></span><span class="n faint">${fmtN(locTot(l))}</span><button class="btn sm line" data-el="${esc(l.id)}">編輯</button></div>`).join('')}
@@ -2605,8 +2611,8 @@ function vEvent() {
   $('#am').innerHTML = head('活動與目標', '活動與目標', '設定每個場次的日期與時間。開啟「依時間自動切換」後，手機會在時間到時自動換到下一個場次。')
     + `<div class="box"><h3>場次<span class="sp"></span><button class="btn sm pri" id="addS">＋ 新增場次</button></h3>
         <div class="togrow" style="border-bottom:1px solid var(--line)"><div>依時間自動切換場次<small>開啟：銷售端依下表的日期與時間自動切換，不在任何時段內時記為「一般銷售」；關閉：銷售人員在「我」自己選擇</small></div><button class="sw ${st.autoSession ? 'on' : ''}" id="autoS" type="button"></button></div>
-        <div class="scroll"><table class="t"><thead><tr><th style="width:160px">日期</th><th style="width:110px">開始</th><th style="width:110px">結束</th><th>場次名稱</th><th class="r" style="width:120px">預估（${esc(st.unit)}）</th><th>備註</th><th></th></tr></thead><tbody>
-        ${d.sessions.map(s => `<tr data-row="${esc(s.id)}"><td class="ed"><input type="date" data-f="date" value="${esc(s.date)}"></td><td class="ed"><input type="time" data-f="start" value="${esc(s.start)}"></td><td class="ed"><input type="time" data-f="end" value="${esc(s.end)}"></td><td class="ed"><input data-f="name" value="${esc(s.name)}"></td><td class="ed"><input class="r n" type="number" data-f="target" value="${s.target}"></td><td class="ed"><input data-f="note" value="${esc(s.note)}"></td><td class="r"><button class="btn sm ghost" data-del="${esc(s.id)}">刪除</button></td></tr>`).join('') || '<tr><td colspan="7" class="faint" style="text-align:center;padding:40px">還沒有場次</td></tr>'}
+        <div class="scroll"><table class="t" style="min-width:900px"><thead><tr><th style="width:140px">日期</th><th style="width:112px">開始</th><th style="width:112px">結束</th><th style="width:190px">場次名稱</th><th class="r" style="width:84px">預估（${esc(st.unit)}）</th><th style="min-width:220px">備註</th><th style="width:64px"></th></tr></thead><tbody>
+        ${d.sessions.map(s => `<tr data-row="${esc(s.id)}"><td class="ed"><input type="date" data-f="date" value="${esc(s.date)}"></td><td class="ed"><input type="time" data-f="start" value="${esc(s.start)}"></td><td class="ed"><input type="time" data-f="end" value="${esc(s.end)}"></td><td class="ed"><input data-f="name" value="${esc(s.name)}" style="min-width:170px"></td><td class="ed"><input class="r n" type="number" data-f="target" value="${s.target}"></td><td class="ed"><input data-f="note" value="${esc(s.note)}" style="min-width:190px"></td><td class="r"><button class="btn sm ghost" data-del="${esc(s.id)}">刪除</button></td></tr>`).join('') || '<tr><td colspan="7" class="faint" style="text-align:center;padding:40px">還沒有場次</td></tr>'}
         </tbody>${d.sessions.length ? `<tfoot><tr><td></td><td></td><td></td><td>合計</td><td class="r n">${fmtN(auto)}</td><td colspan="2"></td></tr></tfoot>` : ''}</table></div>
         <p class="lab" style="margin-top:14px">修改後離開欄位就會自動儲存 · 同一天可以有多個場次（例如上午貴賓場、下午一般場）</p>
       </div>
@@ -2874,7 +2880,7 @@ if (REMOTE) {
 } else {
   const go2 = () => {
     const page = location.hash === '#admin' ? 'admin' : 'sell';
-    document.querySelectorAll('.ov,.viewer').forEach(x => x.remove());
+    document.querySelectorAll('.ov,.viewer').forEach(x => x.remove()); document.documentElement.classList.remove('lock');
     route(page);
     let bar = document.querySelector('.demo');
     if (!bar) { bar = document.createElement('div'); bar.className = 'demo'; document.body.insertBefore(bar, app); }
