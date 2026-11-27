@@ -35,7 +35,7 @@ const SHEETS = {
   stock:     { name: '庫存', cols: ['productId','locationId','qty','updatedAt'], heads: ['品項ID','位置ID','數量','更新時間'] },
   sessions:  { name: '活動場次', cols: ['id','date','name','target','note','sort','start','end'], heads: ['ID','日期','場次','預估售出','備註','排序','開始','結束'] },
   bundles:   { name: '組合優惠', cols: ['id','name','size','price','productIds','active','sort'], heads: ['ID','名稱','件數','組合價','適用品項ID（逗號分隔，空白＝全部）','啟用','排序'] },
-  staff:     { name: '銷售人員', cols: ['id','name','locationId','active','sort','createdAt'], heads: ['ID','名稱','預設倉儲','啟用','排序','建立時間'] },
+  staff:     { name: '銷售人員', cols: ['id','name','locationId','active','sort','createdAt','uid','boundAt','boundDevice'], heads: ['ID','名稱','預設倉儲','啟用','排序','建立時間','綁定裝置ID','綁定時間','綁定裝置'] },
   orders:    { name: '訂單', cols: ['time','orderId','sessionId','sessionName','staffId','staffName','locationId','locationName','payment','units','preUnits','sets','setsText','setsJson','subtotal','discount','total','preorderAmount','collected','customer','phone','note','status','device','clientId','payStatus','cashReceived','change','address','payKey','editedAt','confirmed','confirmedBy','confirmedAt'],
                heads: ['時間','訂單編號','場次ID','場次','帳號ID','銷售人員','出貨位置ID','出貨位置','付款方式','現貨件數','預購件數','組數','組合','組合明細','小計','組合折扣','營收（現貨）','預購金額','本次收款','客人','電話','備註','狀態','裝置','clientId','收款狀態','實收現金','找零','地址','付款代碼','最後修改','收款確認','確認人','確認時間'] },
   items:     { name: '訂單明細', cols: ['time','orderId','productId','productName','kind','qty','listPrice','amount','sessionId','staffName','locationId','status'],
@@ -140,15 +140,41 @@ function apiLoginInfo() {
   const imgs = imageMap_(), st = settings_();
   return {
     settings: { appName: st.appName, logo: imgs.logo || '', accent: st.accent },
-    staff: staffOut_().filter(function (u) { return u.active; }).map(function (u) { return { id: u.id, name: u.name }; }),
+    staff: staffOut_().filter(function (u) { return u.active; }).map(function (u) { return { id: u.id, name: u.name, bound: !!u.uid && u.uid !== myUid_(), mine: !!u.uid && u.uid === myUid_() }; }),
   };
+}
+
+/** 一個名字只綁一支手機：第一次選名字（或打開專屬連結）時，把這支手機綁到這個名字 */
+function myUid_() { return (typeof DB !== 'undefined' && DB.uid) ? String(DB.uid() || '') : ''; }
+function bindStaff_(acc, device) {
+  const me = myUid_();
+  if (!me || String(acc.uid || '')) return;
+  // 一支手機只綁一個名字：先解除這支手機原本綁定的其他名字
+  read_('staff').forEach(function (x) { if (String(x.uid || '') === me && String(x.id) !== String(acc.id)) { x.uid = ''; x.boundAt = ''; x.boundDevice = ''; update_('staff', x); } });
+  acc.uid = me; acc.boundAt = new Date(); acc.boundDevice = String(device || '').slice(0, 60);
+  update_('staff', acc);
+}
+/** 銷售端「切換人員」：解除這支手機與自己名字的綁定 */
+function apiReleaseMe(sid) {
+  const u = read_('staff').filter(function (x) { return String(x.id) === String(sid || ''); })[0];
+  if (u && String(u.uid || '') && String(u.uid) === myUid_()) { u.uid = ''; u.boundAt = ''; u.boundDevice = ''; update_('staff', u); }
+  return true;
+}
+/** 後台：解除綁定（換手機、手機重置時用） */
+function apiUnbindStaff(id) {
+  admin_();
+  const u = read_('staff').filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!u) throw new Error('找不到這位人員');
+  u.uid = ''; u.boundAt = ''; u.boundDevice = ''; update_('staff', u);
+  return true;
 }
 
 /* ============================================================
  * 銷售端
  * ============================================================ */
-function apiBootstrap(sid) {
+function apiBootstrap(sid, device) {
   const acc = staff_(sid);
+  bindStaff_(acc, device);
   const imgs = imageMap_();
   return {
     user: { id: acc.id, name: acc.name, locationId: String(acc.locationId || '') },
@@ -207,7 +233,7 @@ function apiRecordSale(sid, order) {
     if (b.ecpay) row.payKey = randKey_();
     append_('orders', [row]);
     append_('items', b.items(orderId));
-    applyStock_(b.stockOut(orderId, '銷售（' + acc.name + '）'));
+    if (b.fields.confirmed) applyStock_(b.stockOut(orderId, '銷售（' + acc.name + '）'));
     return { orderId: orderId, order: orderWithItems_(row), summary: summary_(acc), stock: stockMap_() };
   } finally { lock.releaseLock(); }
 }
@@ -266,7 +292,7 @@ function buildOrder_(acc, order, st, base) {
     items: function (orderId) {
       return pr.lines.map(function (l) {
         return { time: time, orderId: orderId, productId: l.productId, productName: l.name, kind: l.kind, qty: l.qty,
-                 listPrice: l.price, amount: l.net, sessionId: sid, staffName: acc.name, locationId: loc.id, status: '正常' };
+                 listPrice: l.price, amount: l.net, sessionId: sid, staffName: acc.name, locationId: loc.id, status: confirmed ? '正常' : '待確認' };
       });
     },
     stockOut: function (orderId, reason) {
@@ -301,12 +327,12 @@ function apiEditMyOrder(sid, orderId, order) {
     const o = myOrder_(acc, orderId, true);
     const b = buildOrder_(acc, order, st, { time: o.time, sessionId: String(o.sessionId), locationId: String(o.locationId) });
     const old = read_('items').filter(function (r) { return String(r.orderId) === String(orderId); });
-    applyStock_(old.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
+    if (counted_(o)) applyStock_(old.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
       return { productId: r.productId, locationId: r.locationId, delta: num_(r.qty), reason: '修改訂單退回（' + acc.name + '）', ref: String(orderId) };
     }));
     deleteWhere_('items', function (r) { return String(r.orderId) === String(orderId); });
     append_('items', b.items(String(orderId)));
-    applyStock_(b.stockOut(String(orderId), '修改訂單（' + acc.name + '）'));
+    if (b.fields.confirmed) applyStock_(b.stockOut(String(orderId), '修改訂單（' + acc.name + '）'));
     const keepKey = String(o.payKey || '');
     Object.assign(o, b.fields);
     o.payKey = b.ecpay ? (keepKey || randKey_()) : '';
@@ -350,10 +376,21 @@ function confirm_(orderId, who) {
   const o = findOrder_(orderId);
   if (!o || o.status === '作廢') throw new Error('找不到訂單或訂單已刪除');
   if (isEcpay_(settings_(), String(o.payment)) && o.payStatus !== '已付款') throw new Error('綠界尚未顯示「已付款」，請確認客人已完成付款');
-  if (isTrue_(o.confirmed)) return;
+  if (counted_(o)) return;
   setCell_('orders', o._row, 'confirmed', true);
   setCell_('orders', o._row, 'confirmedBy', who);
   setCell_('orders', o._row, 'confirmedAt', new Date());
+  countOrder_(o, '確認收款（' + who + '）');
+}
+/** 訂單是否已計入（已確認收款；舊資料沒有這個欄位視為已計入） */
+function counted_(o) { return o.status !== '作廢' && (blank_(o.confirmed) || isTrue_(o.confirmed)); }
+/** 確認收款後才計入：明細改為正常、現貨扣庫存 */
+function countOrder_(o, reason) {
+  const its = read_('items').filter(function (r) { return String(r.orderId) === String(o.orderId) && r.status !== '作廢'; });
+  its.forEach(function (r) { if (r.status !== '正常') setCell_('items', r._row, 'status', '正常'); });
+  applyStock_(its.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
+    return { productId: String(r.productId), locationId: String(r.locationId), delta: -num_(r.qty), reason: reason, ref: String(o.orderId) };
+  }));
 }
 
 /** 綠界付款改成其他方式（例如客人改付現金） */
@@ -365,9 +402,11 @@ function apiSetPayment(sid, orderId, payment, cashReceived) {
     if (isEcpay_(st, payment)) throw new Error('請選擇其他付款方式');
     const rec = payment === st.cashName && cashReceived !== undefined && cashReceived !== '' && cashReceived !== null ? Math.round(Number(cashReceived)) : '';
     if (rec !== '' && rec < num_(o.collected)) throw new Error('實收金額不足');
+    const was = counted_(o);
     o.payment = payment; o.payStatus = '已收款'; o.payKey = ''; o.cashReceived = rec; o.change = rec === '' ? '' : rec - num_(o.collected); o.editedAt = new Date();
     o.confirmed = true; o.confirmedBy = acc.name; o.confirmedAt = new Date();
     update_('orders', o);
+    if (!was) countOrder_(o, '改付' + payment + '（' + acc.name + '）');
     return { order: orderWithItems_(o) };
   } finally { lock.releaseLock(); }
 }
@@ -611,11 +650,12 @@ function apiVoidOrder(orderId) {
 function voidOrder_(orderId, who) {
   const o = read_('orders').filter(function (r) { return String(r.orderId) === String(orderId) && r.status !== '作廢'; })[0];
   if (!o) throw new Error('找不到可作廢的訂單');
+  const was = counted_(o);
   setCell_('orders', o._row, 'status', '作廢');
   setCell_('orders', o._row, 'payKey', '');
   const its = read_('items').filter(function (r) { return String(r.orderId) === String(orderId); });
   its.forEach(function (r) { setCell_('items', r._row, 'status', '作廢'); });
-  applyStock_(its.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
+  if (was) applyStock_(its.filter(function (r) { return r.kind === '現貨'; }).map(function (r) {
     return { productId: r.productId, locationId: r.locationId, delta: num_(r.qty), reason: '作廢退回（' + who + '）', ref: String(orderId) };
   }));
 }
@@ -739,11 +779,14 @@ function admin_() {
 function staff_(sid) {
   const u = read_('staff').filter(function (x) { return String(x.id) === String(sid || ''); })[0];
   if (!u || !isTrue_(u.active)) throw new Error('STAFF_INVALID');
+  const me = myUid_();
+  if (String(u.uid || '') && me && String(u.uid) !== me) throw new Error('STAFF_BOUND');
   u.id = String(u.id); u.name = String(u.name);
   return u;
 }
 function staffOut_() {
-  return read_('staff').map(function (u) { return { id: String(u.id), name: String(u.name), locationId: String(u.locationId || ''), active: isTrue_(u.active), sort: num_(u.sort) }; }).sort(bySort_);
+  return read_('staff').map(function (u) { return { id: String(u.id), name: String(u.name), locationId: String(u.locationId || ''), active: isTrue_(u.active), sort: num_(u.sort),
+    uid: String(u.uid || ''), boundAt: u.boundAt instanceof Date ? u.boundAt.getTime() : 0, boundDevice: String(u.boundDevice || '') }; }).sort(bySort_);
 }
 
 function newId_() { return Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(); }
@@ -823,7 +866,7 @@ function itemOut_(r) {
 
 function summary_(acc) {
   const t = today_(), st = settings_(), sessions = sessionsOut_();
-  const items = read_('items').filter(function (i) { return i.status !== '作廢'; });
+  const items = read_('items').filter(function (i) { return i.status !== '作廢' && i.status !== '待確認'; });
   const bySess = {}, preBySess = {};
   let tu = 0, tr = 0, tp = 0;
   items.forEach(function (i) {
@@ -836,8 +879,9 @@ function summary_(acc) {
   let mo = 0, mr = 0, ao = 0, mu = 0;
   read_('orders').forEach(function (o) {
     if (o.status === '作廢' || !(o.time instanceof Date) || dfmt_(o.time) !== t) return;
-    ao++;
-    if (String(o.staffId) === String(acc.id)) { mo++; mr += num_(o.total); if (o.confirmed === false || String(o.confirmed).toUpperCase() === 'FALSE') mu++; }
+    const ok = counted_(o);
+    if (ok) ao++;
+    if (String(o.staffId) === String(acc.id)) { if (ok) { mo++; mr += num_(o.total); } else mu++; }
   });
   const target = num_(st.totalTarget) || sessions.reduce(function (a, s) { return a + s.target; }, 0);
   return {
@@ -1030,6 +1074,7 @@ window.createFirestoreDB = function (cfg) {
     admins() { return admins.slice(); },
     setAdmins(a) { admins = a.map(x => String(x).toLowerCase()); push('set', ref('config', 'admins'), { emails: admins }, { merge: true }); },
     email() { return user && !user.isAnonymous ? String(user.email || '').toLowerCase() : ''; },
+    uid() { return user ? String(user.uid || '') : ''; },
     ecpayPublic() { return Object.assign({}, ecpayPub); },
     saveEcpay(c) {
       const priv = {}, pub = {};
@@ -1263,6 +1308,7 @@ html.lock,html.lock body{overflow:hidden}
 .ord{padding:16px 0;border-bottom:1px solid var(--line)}
 .ord.void{opacity:.4}
 .ord .hd{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.ord .tags{display:flex;flex-wrap:wrap;gap:6px 10px;margin:-2px 0 6px}
 .ord .it{display:flex;gap:8px;align-items:center;margin:2px 0}
 .minibars{display:flex;align-items:flex-end;gap:10px;height:140px;margin-top:22px;border-bottom:1px solid var(--ink)}
 .minibars .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;position:relative}
@@ -1302,9 +1348,15 @@ html.lock,html.lock body{overflow:hidden}
 .mtx{font-size:13.5px}.mtx th,.mtx td{padding:9px 6px}
 .mtx td.cur,.mtx th.cur{background:var(--soft);font-weight:500}
 .names{border-top:1px solid var(--ink)}
+p.err{color:var(--red)}
+.sharebox{display:flex;gap:22px;align-items:flex-start;padding:18px 0 22px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.sharebox .qr{width:132px;height:132px;flex:none;border:1px solid var(--line);padding:8px;background:#fff}
+.sharebox .qr svg{width:100%;height:100%;display:block}
 .names button{display:flex;align-items:center;width:100%;padding:20px 2px;border:0;border-bottom:1px solid var(--line);background:none;font-size:22px;font-weight:400;letter-spacing:-.02em;text-align:left}
 .names button:hover{background:var(--soft)}
 .names button span{margin-left:auto;color:var(--ink3);font-size:18px}
+.names button:disabled{color:var(--ink3);cursor:not-allowed;background:none}
+.names button:disabled span{font-size:13px;letter-spacing:0}
 
 /* PDF viewer */
 .viewer{position:fixed;inset:0;background:var(--tile);z-index:70;display:flex;flex-direction:column}
@@ -1710,7 +1762,12 @@ const PAYTAG = { '已收款': '', '待付款': 'amb', '已付款': 'ok', '模擬
 
 function startSell() {
   document.body.classList.add('phone');
-  onErrCode = code => { if (code === 'STAFF_INVALID') { store.del('sid'); setUrlStaff(''); M.sid = ''; pickName('這個名字已停用或不存在，請重新選擇'); return true; } return false; };
+  onErrCode = code => {
+    const msg = { STAFF_INVALID: '這個名字已停用或不存在，請重新選擇', STAFF_BOUND: '這個名字已經綁定在另一支手機。如果是你換了手機，請管理者到後台「人員與權限」按「解除綁定」。' }[code];
+    if (!msg) return false;
+    document.querySelectorAll('.ov').forEach(o => o.close ? o.close() : o.remove());
+    store.del('sid'); setUrlStaff(''); M.sid = ''; M.cart = []; M.tab = 'sell'; pickName(msg); return true;
+  };
   M.sid = URLP.u || store.get('sid', '');
   if (M.sid) { store.set('sid', M.sid); return bootSell(); }
   pickName();
@@ -1725,14 +1782,18 @@ async function pickName(msg) {
     ${logoHTML(info.settings, 20)}
     <p class="lab" style="margin:56px 0 10px">銷售登入</p>
     <h1 style="font-size:36px;line-height:1.1;margin-bottom:10px">你是哪一位？</h1>
-    <p class="muted" style="margin:0 0 28px">${esc(msg || '選擇名字後，這支手機會一直記得你，訂單會記錄是誰賣出。')}</p>
-    <div class="names">${info.staff.map(u => `<button data-u="${esc(u.id)}">${esc(u.name)}<span>→</span></button>`).join('') || '<p class="muted" style="padding:20px 0">還沒有銷售人員，請管理者到後台「人員與權限」新增。</p>'}</div>
+    <p class="${msg ? 'err' : 'muted'}" style="margin:0 0 28px">${esc(msg || '選擇自己的名字後，這支手機就會綁定這個名字，之後打開就直接是你。')}</p>
+    <div class="names">${info.staff.map(u => u.bound ? `<button disabled>${esc(u.name)}<span>已綁定其他手機</span></button>` : `<button data-u="${esc(u.id)}">${esc(u.name)}<span>${u.mine ? '這支手機 →' : '→'}</span></button>`).join('') || '<p class="muted" style="padding:20px 0">還沒有銷售人員，請管理者到後台「人員與權限」新增。</p>'}</div>
   </div>`;
-  $$('[data-u]').forEach(b => b.onclick = () => { M.sid = b.dataset.u; store.set('sid', M.sid); setUrlStaff(M.sid); bootSell(); });
+  $$('[data-u]').forEach(b => b.onclick = async () => {
+    const nm = b.firstChild.textContent;
+    if (!b.textContent.includes('這支手機') && !await confirmBox(`你是「${nm}」嗎？`, '確認後這支手機會綁定這個名字，其他手機就不能再選它。選錯了可以在「我」→「切換人員」解除。', '是我，綁定')) return;
+    M.sid = b.dataset.u; store.set('sid', M.sid); setUrlStaff(M.sid); bootSell();
+  });
 }
 async function bootSell() {
   centerScreen('<div class="spin"></div>');
-  try { M.data = await api('apiBootstrap', M.sid); } catch (e) { if (e.handled) return; return errorScreen(e); }
+  try { M.data = await api('apiBootstrap', M.sid, deviceName()); } catch (e) { if (e.handled) return; return errorScreen(e); }
   setUrlStaff(M.sid);
   const d = M.data, st = d.settings;
   store.set('lastSettings', { appName: st.appName, logo: st.logo, accent: st.accent });
@@ -1902,7 +1963,7 @@ async function submitNew(order, { pr, collect, close }) {
     M.data.summary = r.summary; M.data.stock = r.stock;
     done(); renderPending();
     if (r.order && r.order.payStatus === '待付款') return ecpayDialog(r.order);
-    toast(order.cashReceived !== undefined ? `已登記 · 找零 ${money(order.cashReceived - collect)}` : order.confirmed === false ? '已登記，收款待確認' : '已登記並確認收款 ' + money(collect));
+    toast(order.cashReceived !== undefined ? `已登記 · 找零 ${money(order.cashReceived - collect)}` : order.confirmed === false ? '已登記，確認收款後才會計入' : '已登記並確認收款 ' + money(collect));
   } catch (e) {
     if (e.handled) return;
     if (isNetErr(e) && !isEcpayPay(st, order.payment)) {
@@ -1951,7 +2012,7 @@ function payConfirmDialog(due, payment, editing) {
       body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>付款方式</span><span style="font-size:18px">${esc(payment)}</span></div>
         <div class="spec"><span>應收金額</span><span class="n" style="font-size:34px;font-weight:300">${money(due)}</span></div>
         <p style="margin:18px 0 6px;font-size:16px">請確認已收到客人的 <b>${esc(payment)}</b> 款項 ${money(due)}。</p>
-        <p class="note">如果客人還沒完成付款（例如轉帳稍後才會入帳），可以先登記，之後在「我的訂單」按「確認收款」。後台會標記確認人與時間。</p>`,
+        <p class="note">如果客人還沒完成付款（例如轉帳稍後才會入帳），可以先登記，但<b>要等按「確認收款」後才會計入</b>售出、營收並扣庫存。之後在「我的訂單」按「確認收款」，後台會標記確認人與時間。</p>`,
       foot: `<button class="btn line" id="later">${editing ? '稍後確認' : '先登記，稍後確認'}</button><button class="btn pri" id="yes" style="flex:1">確認已收款</button>` });
     $('#yes', m).onclick = () => { v = 'yes'; m.close(); };
     $('#later', m).onclick = () => { v = 'later'; m.close(); };
@@ -2028,7 +2089,7 @@ function renderPending() {
   const el = $('#pend'); if (!el) return;
   const un = (M.data.summary.today || {}).myUnconfirmed || 0;
   el.innerHTML = (M.pending.length ? `<div class="pend"><span>${M.pending.length} 筆銷售尚未上傳</span><span class="sp"></span><button class="btn sm line" id="retry">重試</button></div>` : '')
-    + (un && M.tab !== 'me' ? `<div class="pend"><span>今天有 ${un} 筆收款待確認</span><span class="sp"></span><button class="btn sm line" id="toMe">查看</button></div>` : '');
+    + (un && M.tab !== 'me' ? `<div class="pend"><span>今天有 ${un} 筆收款待確認，確認後才計入</span><span class="sp"></span><button class="btn sm line" id="toMe">查看</button></div>` : '');
   if (M.pending.length) $('#retry').onclick = flushPending;
   if (un && M.tab !== 'me') $('#toMe').onclick = () => go('me');
 }
@@ -2122,9 +2183,11 @@ function orderHTML(o, actions) {
   const st = M.data.settings, voided = o.status === '作廢';
   const ecPaid = o.payStatus === '已付款' && isEcpayPay(st, o.payment);
   const amount = Number(o.collected) || !Number(o.preorderAmount) ? money(o.collected) : '預購 ' + money(o.preorderAmount);
-  return `<div class="ord ${voided ? 'void' : ''}"><div class="hd"><span class="lab n">${fmtT(o.time)}</span><span class="lab">${esc(o.staffName)} · ${esc(o.payment)}</span>
-      ${voided ? '<span class="tag red">已刪除</span>' : o.payStatus && o.payStatus !== '已收款' ? `<span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${!voided && !o.confirmed && o.payStatus !== '待付款' ? '<span class="tag amb">待確認收款</span>' : ''}${o.editedAt ? '<span class="tag">已修改</span>' : ''}
-      <span class="sp"></span><span class="n">${amount}</span></div>
+  const tags = (voided ? '<span class="tag red">已刪除</span>' : o.payStatus && o.payStatus !== '已收款' ? `<span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : '')
+    + (!voided && !o.confirmed ? `<span class="tag amb">${o.payStatus === '待付款' ? '' : '待確認收款 · '}未計入</span>` : '') + (o.editedAt ? '<span class="tag">已修改</span>' : '');
+  return `<div class="ord ${voided ? 'void' : ''}"><div class="hd"><span class="lab n">${fmtT(o.time)}</span><span class="lab" style="white-space:nowrap">${esc(o.staffName)} · ${esc(o.payment)}</span>
+      <span class="sp"></span><span class="n" style="white-space:nowrap">${amount}</span></div>
+    ${tags ? `<div class="tags">${tags}</div>` : ''}
     ${o.items.map(i => `<div class="it">${esc(i.productName)} <span class="faint n">× ${i.qty}</span>${i.kind === '預購' ? '<span class="tag amb">預購</span>' : ''}</div>`).join('')}
     ${o.setsText ? `<div class="lab" style="margin-top:4px">${esc(o.setsText)}</div>` : ''}
     ${o.cashReceived !== '' && o.cashReceived != null ? `<div class="lab" style="margin-top:4px">實收 ${money(o.cashReceived)} · 找零 ${money(o.change)}</div>` : ''}
@@ -2153,14 +2216,15 @@ async function renderMe() {
     <div class="sec"><h2>我的訂單</h2><span class="lab">${st.staffEdit ? '可修改／刪除' : '僅供查看'}</span></div>
     <div class="pad" id="myo"><div class="spin" style="margin:30px auto"></div></div>
     <div class="pad" style="margin-top:30px"><button class="btn line lg" id="sw">切換人員</button>
-      <p class="note">這支手機會一直記住你的名字，重新整理或關掉網頁都不會登出。把網頁「加入主畫面」最方便。</p></div>`;
+      <p class="note">這支手機已綁定「${esc(u.name)}」，重新整理或關掉網頁都不會登出。把網頁「加入主畫面」最方便。按「切換人員」會解除綁定。</p></div>`;
   $$('[data-k]', mm).forEach(g => $$('.chip', g).forEach(b => b.onclick = () => {
     const k = g.dataset.k; M[k] = b.dataset.v;
     if (k === 'sessSel') store.set('sess', { date: M.data.summary.date, v: M.sessSel }); else store.set(k, M[k]);
     $$('.chip', g).forEach(x => x.classList.toggle('on', x === b));
   }));
   $('#sw').onclick = async () => {
-    if (M.cart.length && !await confirmBox('切換人員？', '購物清單會被清空。', '切換')) return;
+    if (!await confirmBox('切換人員？', `這支手機會解除與「${u.name}」的綁定${M.cart.length ? '，購物清單也會被清空' : ''}。`, '解除並切換')) return;
+    try { await api('apiReleaseMe', M.sid); } catch (e) { if (e.handled) return; toast(e.message, 'err'); return; }
     store.del('sid'); setUrlStaff(''); M.sid = ''; M.cart = []; M.tab = 'sell'; pickName();
   };
   let list;
@@ -2169,7 +2233,7 @@ async function renderMe() {
   M.myOrders = list;
   if (!list.length) { box.innerHTML = '<div class="empty" style="margin:0">還沒有訂單</div>'; return; }
   const days = {}; list.forEach(o => (days[dKey(o.time)] = days[dKey(o.time)] || []).push(o));
-  box.innerHTML = Object.entries(days).map(([k, os], i) => { const ok = os.filter(o => o.status !== '作廢');
+  box.innerHTML = Object.entries(days).map(([k, os], i) => { const ok = os.filter(o => o.status !== '作廢' && o.confirmed);
     return `<details class="day" ${i === 0 ? 'open' : ''}><summary><span>${md(k)}（${WD[new Date(k + 'T12:00:00').getDay()]}）· ${ok.length} 筆 ▾</span><span class="n">${money(ok.reduce((a, o) => a + o.total, 0))}</span></summary>${os.map(o => orderHTML(o, true)).join('')}</details>`; }).join('');
   const find = id => M.myOrders.find(o => o.orderId === id);
   $$('[data-qr]', box).forEach(b => b.onclick = () => ecpayDialog(find(b.dataset.qr)));
@@ -2324,8 +2388,10 @@ function renderAdmin() {
   window.scrollTo(0, y);
 }
 const head = (crumb, title, desc, right = '') => `<div class="lab crumb">後台 / ${esc(crumb)}</div><div class="a-head"><div class="tt"><h1>${esc(title)}</h1>${desc ? `<p>${desc}</p>` : ''}</div>${right}</div>`;
-const validItems = () => A.d.items.filter(i => i.status !== '作廢');
-const validOrders = () => A.d.orders.filter(o => o.status !== '作廢');
+/* 計入統計：未作廢且已確認收款（未確認的訂單不算售出、營收，也還沒扣庫存） */
+const validItems = () => A.d.items.filter(i => i.status !== '作廢' && i.status !== '待確認');
+const counted = o => o.status !== '作廢' && o.confirmed;
+const validOrders = () => A.d.orders.filter(counted);
 const prodLabel = (p, all) => { const same = all.filter(x => x.name === p.name).length > 1; return same && p.spec ? p.spec : p.spec ? p.name + ' ' + p.spec : p.name; };
 
 /* ---- 總覽（參考 VGhouse 銷售記錄表） ---- */
@@ -2334,6 +2400,7 @@ function vDash() {
   const items = validItems(), orders = validOrders();
   const inEvent = ss.length ? (x => ss.some(s => s.id === x.sessionId)) : (() => true);
   const evItems = items.filter(inEvent), evOrders = orders.filter(inEvent);
+  const unconf = A.d.orders.filter(o => o.status !== '作廢' && !o.confirmed).filter(inEvent);
   const target = Number(st.totalTarget) || ss.reduce((a, s) => a + s.target, 0);
   const live = evItems.filter(i => i.kind === '現貨');
   const sold = live.reduce((a, i) => a + i.qty, 0), rev = live.reduce((a, i) => a + i.amount, 0);
@@ -2370,7 +2437,7 @@ function vDash() {
     + `<div class="kpis">
       <div class="kpi main"><span class="lab">目標達成率</span><b class="n">${target ? p + '%' : '—'}</b><div class="bar"><i style="width:${Math.min(100, p)}%"></i></div><span class="s">目標 ${fmtN(target)} ${esc(unit)}</span></div>
       <div class="kpi"><span class="lab">累計售出（${esc(unit)}）</span><b class="n">${fmtN(sold)}</b><span class="s">${fmtN(evOrders.length)} 筆訂單</span></div>
-      <div class="kpi"><span class="lab">累計營收（NT$）</span><b class="n">${fmtN(rev)}</b><span class="s">${evOrders.filter(o => !o.confirmed).length ? `<a href="#" id="toUnconf" style="color:var(--amb)">${evOrders.filter(o => !o.confirmed).length} 筆未確認收款 →</a>` : '收款皆已確認'}</span></div>
+      <div class="kpi"><span class="lab">累計營收（NT$）</span><b class="n">${fmtN(rev)}</b><span class="s">${unconf.length ? `<a href="#" id="toUnconf" style="color:var(--amb)">另有 ${unconf.length} 筆未確認收款（未計入）→</a>` : '收款皆已確認'}</span></div>
       <div class="kpi"><span class="lab">距目標還差（${esc(unit)}）</span><b class="n">${target ? fmtN(Math.max(0, target - sold)) : '—'}</b><span class="s">${target && sold >= target ? '已達標' : '&nbsp;'}</span></div>
       <div class="kpi"><span class="lab">預購登記累計（${esc(unit)}）</span><b class="n">${fmtN(pre)}</b><span class="s">不計入售出</span></div>
     </div>
@@ -2446,9 +2513,9 @@ function vOrders() {
     && (!A.staff || o.staffName === A.staff) && (A.sess === '*' || o.sessionId === A.sess) && (!A.conf || (A.conf === 'no' ? !o.confirmed && o.status !== '作廢' : o.confirmed)));
   if (q) list = list.filter(o => [o.orderId, o.staffName, o.payment, o.payStatus, o.sessionName, o.note, o.customer, o.phone, o.address, o.device, ...(itemsBy[o.orderId] || []).map(i => i.productName)].join(' ').toLowerCase().includes(q));
   list = list.slice().sort((x, y) => y.time - x.time);
-  const ok = list.filter(o => o.status !== '作廢');
+  const ok = list.filter(counted);
   const staffs = [...new Set(d.orders.map(o => o.staffName))];
-  $('#am').innerHTML = head('訂單', '訂單', `${fmtN(ok.length)} 筆 · 售出 ${fmtN(ok.reduce((s, o) => s + Number(o.units), 0))} ${esc(st.unit)} · 營收 ${money(ok.reduce((s, o) => s + Number(o.total), 0))}${list.length - ok.length ? ` · 另有 ${list.length - ok.length} 筆作廢` : ''}${ok.filter(o => o.payStatus === '待付款').length ? ` · <span style="color:var(--amb)">${ok.filter(o => o.payStatus === '待付款').length} 筆待付款</span>` : ''}${ok.filter(o => !o.confirmed).length ? ` · <span style="color:var(--amb)">${ok.filter(o => !o.confirmed).length} 筆未確認收款</span>` : ''}`)
+  $('#am').innerHTML = head('訂單', '訂單', `${fmtN(ok.length)} 筆 · 售出 ${fmtN(ok.reduce((s, o) => s + Number(o.units), 0))} ${esc(st.unit)} · 營收 ${money(ok.reduce((s, o) => s + Number(o.total), 0))}${list.filter(o => o.status === '作廢').length ? ` · 另有 ${list.filter(o => o.status === '作廢').length} 筆作廢` : ''}${list.filter(o => o.status !== '作廢' && o.payStatus === '待付款').length ? ` · <span style="color:var(--amb)">${list.filter(o => o.status !== '作廢' && o.payStatus === '待付款').length} 筆待付款</span>` : ''}${list.filter(o => o.status !== '作廢' && !o.confirmed).length ? ` · <span style="color:var(--amb)">另有 ${list.filter(o => o.status !== '作廢' && !o.confirmed).length} 筆未確認收款（未計入）</span>` : ''}`)
     + `<div class="row" style="flex-wrap:wrap;margin-bottom:20px">
       <div class="seg" id="rg">${[['event', '活動期間'], ['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['all', '全部']].map(([k, t]) => `<button data-r="${k}" class="${A.range === k ? 'on' : ''}">${t}</button>`).join('')}</div>
       <select class="inp" id="fs" style="width:auto;min-height:38px;padding:6px 10px;font-size:14px"><option value="">全部人員</option>${staffs.map(s => `<option ${s === A.staff ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
@@ -2645,16 +2712,22 @@ function vEvent() {
 /* ---- 人員與權限 ---- */
 function vPeople() {
   const d = A.d, su = siteUrl(d.settings);
-  const link = u => su ? su + (su.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(u.id) : '';
   $('#am').innerHTML = head('人員與權限', '人員與權限', '銷售人員在手機上選名字就能登記，不需要密碼；後台只有下方「管理者」名單裡的 Google 帳號能進入。')
     + `<div class="box"><h3>銷售人員<span class="sp"></span><button class="btn sm pri" id="addU">＋ 新增人員</button></h3>
-      <div class="scroll"><table class="t"><thead><tr><th>名稱</th><th>預設倉儲</th><th class="r">訂單數</th><th>狀態</th><th>專屬連結</th><th></th></tr></thead><tbody>
+      <div class="sharebox">
+        <div class="qr" id="shareQr"></div>
+        <div style="flex:1;min-width:0"><div class="lab">共用登入連結（所有銷售人員都用這一個）</div>
+          <p style="margin:6px 0 12px;word-break:break-all">${su ? esc(su) : '<span class="faint">請先到「系統」填入網站網址</span>'}</p>
+          ${su ? `<button class="btn sm line" data-cp="${esc(su)}">複製連結</button>` : ''}
+          <p class="note" style="margin-top:12px">把這個連結或 QR code 傳給大家。每個人打開後選自己的名字，那支手機就會綁定這個名字，其他手機不能再選。換手機時，在下表按「解除綁定」。</p></div>
+      </div>
+      <div class="scroll"><table class="t"><thead><tr><th>名稱</th><th>預設倉儲</th><th class="r">訂單數</th><th>狀態</th><th>綁定的手機</th><th></th></tr></thead><tbody>
       ${d.staff.map(u => `<tr><td>${esc(u.name)}</td><td>${esc((d.locations.find(l => l.id === u.locationId) || {}).name || '—')}</td><td class="r n">${fmtN(u.orders)}</td>
         <td>${u.active ? '<span class="tag ok">啟用</span>' : '<span class="tag red">停用</span>'}</td>
-        <td>${su ? `<button class="btn sm line" data-cp="${esc(link(u))}">複製連結</button>` : '<span class="faint" style="font-size:13px">到「系統」填入銷售頁網址後可用</span>'}</td>
+        <td>${u.uid ? `<div class="row" style="gap:12px;flex-wrap:nowrap"><span style="white-space:nowrap">${esc(u.boundDevice || '已綁定')}<br><span class="lab">${u.boundAt ? fmtDT(u.boundAt) : ''}</span></span><button class="btn sm line" data-ub="${esc(u.id)}" data-un="${esc(u.name)}">解除綁定</button></div>` : '<span class="faint">尚未綁定</span>'}</td>
         <td class="r"><button class="btn sm line" data-eu="${esc(u.id)}">編輯</button></td></tr>`).join('') || '<tr><td colspan="6" class="faint" style="text-align:center;padding:40px">還沒有人員</td></tr>'}
       </tbody></table></div>
-      <p class="note">專屬連結會直接用該人員登入，傳給他用手機打開並「加入主畫面」，之後永遠不用再選名字。停用後，他的手機會回到選名字畫面，過去訂單保留。</p>
+      <p class="note">停用人員後，他的手機會回到選名字畫面，過去訂單保留。</p>
     </div>
     <div class="box"><h3>管理者<span class="sp"></span><span class="lab">Google 帳號</span></h3>
       ${d.admins.map(e => `<div class="linkrow"><span style="flex:1">${esc(e)}${e === d.owner ? ' <span class="tag ac">擁有者</span>' : ''}${e === d.me.email ? ' <span class="tag">你</span>' : ''}</span>${e !== d.owner && e !== d.me.email ? `<button class="btn sm danger" data-rm="${esc(e)}">移除</button>` : ''}</div>`).join('')}
@@ -2664,6 +2737,8 @@ function vPeople() {
   $('#addU').onclick = () => staffEditor();
   $$('[data-eu]').forEach(b => b.onclick = () => staffEditor(d.staff.find(u => u.id === b.dataset.eu)));
   $$('[data-cp]').forEach(b => b.onclick = () => copy(b.dataset.cp));
+  if (su) fillQr($('#shareQr'), su); else $('#shareQr').remove();
+  $$('[data-ub]').forEach(b => b.onclick = async () => { if (await confirmBox('解除綁定？', `「${b.dataset.un}」目前綁定的手機會回到選名字畫面，之後可以用新手機重新選這個名字。`, '解除綁定')) act(() => api('apiUnbindStaff', b.dataset.ub), '已解除綁定'); });
   $$('[data-rm]').forEach(b => b.onclick = async () => { if (await confirmBox('移除管理者？', `${b.dataset.rm} 將無法進入後台。`, '移除', true)) act(() => api('apiRemoveAdmin', b.dataset.rm), '已移除'); });
   $('#addA').onclick = () => { const e = $('#ae').value.trim(); if (!e) return; act(() => api('apiAddAdmin', e), '已加入管理者'); };
 }
