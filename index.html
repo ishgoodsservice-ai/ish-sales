@@ -36,7 +36,7 @@ const SHEETS = {
   sessions:  { name: '活動場次', cols: ['id','date','name','target','note','sort','start','end'], heads: ['ID','日期','場次','預估售出','備註','排序','開始','結束'] },
   bundles:   { name: '組合優惠', cols: ['id','name','size','price','productIds','active','sort'], heads: ['ID','名稱','件數','組合價','適用品項ID（逗號分隔，空白＝全部）','啟用','排序'] },
   staff:     { name: '銷售人員', cols: ['id','name','locationId','active','sort','createdAt','uid','boundAt','boundDevice'], heads: ['ID','名稱','預設倉儲','啟用','排序','建立時間','綁定裝置ID','綁定時間','綁定裝置'] },
-  orders:    { name: '訂單', cols: ['time','orderId','sessionId','sessionName','staffId','staffName','locationId','locationName','payment','units','preUnits','sets','setsText','setsJson','subtotal','discount','total','preorderAmount','collected','customer','phone','note','status','device','clientId','payStatus','cashReceived','change','address','payKey','editedAt','confirmed','confirmedBy','confirmedAt'],
+  orders:    { name: '訂單', cols: ['time','orderId','sessionId','sessionName','staffId','staffName','locationId','locationName','payment','units','preUnits','sets','setsText','setsJson','subtotal','discount','total','preorderAmount','collected','customer','phone','note','status','device','clientId','payStatus','cashReceived','change','address','payKey','editedAt','confirmed','confirmedBy','confirmedAt','transferLast3','transferAccount'],
                heads: ['時間','訂單編號','場次ID','場次','帳號ID','銷售人員','出貨位置ID','出貨位置','付款方式','現貨件數','預購件數','組數','組合','組合明細','小計','組合折扣','營收（現貨）','預購金額','本次收款','客人','電話','備註','狀態','裝置','clientId','收款狀態','實收現金','找零','地址','付款代碼','最後修改','收款確認','確認人','確認時間'] },
   items:     { name: '訂單明細', cols: ['time','orderId','productId','productName','kind','qty','listPrice','amount','sessionId','staffName','locationId','status'],
                heads: ['時間','訂單編號','品項ID','品項','類型','數量','原價','實收金額','場次ID','銷售人員','出貨位置ID','狀態'] },
@@ -74,6 +74,8 @@ const DEFAULTS = {
   cashName: '現金',
   ecpayEnabled: false,
   ecpayName: '綠界掃碼',
+  transferName: '轉帳',
+  transferAccounts: [],
 };
 
 /* ============================================================
@@ -277,6 +279,8 @@ function buildOrder_(acc, order, st, base) {
   const sid = sess ? sess.id : '';
   const noPay = collected <= 0;
   const confirmed = noPay || (isCash && received !== '') || (!ecpay && !isCash && order.confirmed === true);
+  const isTransfer = !noPay && payment === st.transferName;
+  const last3 = isTransfer && confirmed ? last3_(order.transferLast3) : '';
   return {
     time: time, ecpay: ecpay, collected: collected,
     fields: {
@@ -288,6 +292,7 @@ function buildOrder_(acc, order, st, base) {
       customer: customer, phone: phone, address: address, note: String(order.note || ''),
       payStatus: ecpay ? '待付款' : '已收款', cashReceived: received, change: received === '' ? '' : received - collected, payKey: '',
       confirmed: confirmed, confirmedBy: confirmed ? (noPay ? '（無需收款）' : acc.name) : '', confirmedAt: confirmed ? new Date() : '',
+      transferLast3: last3, transferAccount: isTransfer ? String(order.transferAccount || '').slice(0, 80) : '',
     },
     items: function (orderId) {
       return pr.lines.map(function (l) {
@@ -360,23 +365,34 @@ function apiPayStatus(sid, orderId) {
   return { payStatus: String(o.payStatus || ''), status: String(o.status) };
 }
 /** 收款二次確認（任何銷售人員都可以確認，會記錄確認人與時間） */
-function apiConfirmPayment(sid, orderId) {
+function apiConfirmPayment(sid, orderId, last3, account) {
   const acc = staff_(sid);
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try { confirm_(orderId, acc.name); return { order: orderWithItems_(findOrder_(orderId)), summary: summary_(acc) }; }
+  try { confirm_(orderId, acc.name, last3, account); return { order: orderWithItems_(findOrder_(orderId)), summary: summary_(acc) }; }
   finally { lock.releaseLock(); }
 }
-function apiAdminConfirm(orderId) {
+function apiAdminConfirm(orderId, last3) {
   const me = admin_();
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try { confirm_(orderId, me); return true; } finally { lock.releaseLock(); }
+  try { confirm_(orderId, me, last3); return true; } finally { lock.releaseLock(); }
 }
 function findOrder_(orderId) { return read_('orders').filter(function (r) { return String(r.orderId) === String(orderId); })[0]; }
-function confirm_(orderId, who) {
+/** 轉帳要手動確認，並記錄對方轉帳帳號末三碼 */
+function last3_(v) {
+  const t = String(v === undefined || v === null ? '' : v).trim();
+  if (!/^\d{3}$/.test(t)) throw new Error('請輸入對方轉帳帳號的末三碼（3 位數字）');
+  return t;
+}
+function confirm_(orderId, who, last3, account) {
   const o = findOrder_(orderId);
   if (!o || o.status === '作廢') throw new Error('找不到訂單或訂單已刪除');
-  if (isEcpay_(settings_(), String(o.payment)) && o.payStatus !== '已付款') throw new Error('綠界尚未顯示「已付款」，請確認客人已完成付款');
+  const st = settings_();
+  if (isEcpay_(st, String(o.payment)) && o.payStatus !== '已付款') throw new Error('綠界尚未顯示「已付款」，請確認客人已完成付款');
   if (counted_(o)) return;
+  if (String(o.payment) === st.transferName && num_(o.collected) > 0) {
+    setCell_('orders', o._row, 'transferLast3', last3_(last3));
+    if (account) setCell_('orders', o._row, 'transferAccount', String(account).slice(0, 80));
+  }
   setCell_('orders', o._row, 'confirmed', true);
   setCell_('orders', o._row, 'confirmedBy', who);
   setCell_('orders', o._row, 'confirmedAt', new Date());
@@ -457,10 +473,26 @@ function apiAdminData() {
   };
 }
 
+/** 轉帳收款帳戶：銀行代碼 3 碼、帳號 6–16 碼數字 */
+function cleanAccounts_(list) {
+  let def = false;
+  const out = (Array.isArray(list) ? list : []).map(function (a, i) {
+    const bank = String(a.bankCode || '').replace(/\D/g, ''), acct = String(a.account || '').replace(/\D/g, '');
+    if (!/^\d{3}$/.test(bank)) throw new Error('第 ' + (i + 1) + ' 個帳戶：銀行代碼要是 3 位數字');
+    if (acct.length < 6 || acct.length > 16) throw new Error('第 ' + (i + 1) + ' 個帳戶：帳號要是 6–16 位數字');
+    const d = !!a.isDefault && !def; if (d) def = true;
+    return { id: String(a.id || ('T' + Date.now().toString(36) + i)), bankCode: bank, bankName: String(a.bankName || '').trim().slice(0, 30),
+             account: acct, holder: String(a.holder || '').trim().slice(0, 40), isDefault: d };
+  });
+  if (out.length && !def) out[0].isDefault = true;
+  return out;
+}
 function apiSaveSettings(s) {
   admin_();
   const cur = settings_();
   Object.keys(DEFAULTS).forEach(function (k) { if (s[k] !== undefined) cur[k] = s[k]; });
+  if (s.transferAccounts !== undefined) cur.transferAccounts = cleanAccounts_(s.transferAccounts);
+  cur.transferName = String(cur.transferName || '轉帳').trim() || '轉帳';
   writeSettings_(cur);
   if (s.logo !== undefined) saveImage_('logo', s.logo);
   return settingsOut_(imageMap_());
@@ -1391,6 +1423,8 @@ html.lock,html.lock body{overflow:hidden}
 p.err{color:var(--red)}
 .pbar{height:6px;background:var(--bg2,#f1efe9);margin:4px 0 2px}.pbar i{display:block;height:100%;background:var(--ac)}
 .t tr.tot td{border-top:1px solid var(--ink);font-weight:500}
+.tq{display:flex;gap:14px;align-items:center;margin:12px 0 4px}.tq .qrbig{width:156px;height:156px;flex:none;margin:0}.tq .qrbig svg{width:100%;height:100%}.tqi{min-width:0}
+@media (max-width:380px){.tq{flex-direction:column;align-items:flex-start}}
 .sharebox{display:flex;gap:22px;align-items:flex-start;padding:18px 0 22px;border-bottom:1px solid var(--line);margin-bottom:8px}
 .sharebox .qr{width:132px;height:132px;flex:none;border:1px solid var(--line);padding:8px;background:#fff}
 .sharebox .qr svg{width:100%;height:100%;display:block}
@@ -1989,7 +2023,8 @@ function checkoutSheet({ cart, sets, form, title = '確認銷售', submitLabel =
     } else if (collect > 0 && !isEcpayPay(st, order.payment)) {
       const c = await payConfirmDialog(collect, order.payment, editing);
       if (c === null) return;
-      order.confirmed = c === 'yes';
+      order.confirmed = c.v === 'yes';
+      if (c.last3) { order.transferLast3 = c.last3; order.transferAccount = c.account; }
     }
     const go = $('#go', m); go.disabled = true; go.textContent = '處理中…';
     try { await onSubmit(order, { pr, collect, close: () => m.close() }); }
@@ -2047,23 +2082,56 @@ function cashDialog(due, title = '現金收款') {
 }
 
 /** 非現金、非綠界的付款方式：收款二次確認 */
-function payConfirmDialog(due, payment, editing) {
+/* 轉帳：TWQR 轉帳 QR code（銀行代碼、帳號補滿 16 碼、金額 ×100） */
+const isTransferPay = (st, p) => !!p && p === (st.transferName || '轉帳');
+const acctLabel = a => `${a.bankCode}${a.bankName ? ' ' + a.bankName : ''} ${a.account}`;
+const twqr = (a, amount) => `TWQRP://${a.bankCode}NTTransfer/158/02/V1?D1=${Math.round(Number(amount) || 0) * 100}&D5=${a.bankCode}&D6=${String(a.account).padStart(16, '0')}&D10=901`;
+function transferBlock(st, due, pick) {
+  const accts = st.transferAccounts || [];
+  if (!accts.length) return '<p class="note" style="margin-top:14px">後台還沒設定轉帳收款帳戶（系統 → 轉帳收款帳戶），所以不會顯示轉帳 QR code。</p>';
+  const a = accts.find(x => x.id === pick) || accts.find(x => x.isDefault) || accts[0];
+  return `${accts.length > 1 ? `<div class="seg" id="tAcc" style="margin:14px 0 4px;flex-wrap:wrap">${accts.map(x => `<button type="button" data-ta="${esc(x.id)}" class="${x.id === a.id ? 'on' : ''}">${esc(x.bankName || x.bankCode)} …${esc(x.account.slice(-4))}</button>`).join('')}</div>` : ''}
+    <div class="tq"><div class="qrbig" id="tqr" data-acc="${esc(a.id)}"><div class="spin"></div></div>
+      <div class="tqi"><div class="lab">轉入帳戶</div><b>${esc(a.bankCode)} ${esc(a.bankName)}</b><div class="n" style="font-size:17px;margin:2px 0;word-break:break-all">${esc(a.account)}</div>${a.holder ? `<div class="faint">戶名 ${esc(a.holder)}</div>` : ''}
+      <div class="lab" style="margin-top:10px">轉帳金額</div><div class="n" style="font-size:22px">${money(due)}</div></div></div>
+    <p class="note">請客人用銀行 App 的「掃碼轉帳」掃描。部分銀行 App 不會自動帶入金額，請客人自行輸入 ${money(due)}。</p>`;
+}
+/** 收款確認。轉帳要看過客人轉帳成功畫面，並輸入對方帳號末三碼。回傳 { v: 'yes' | 'later', last3, account } 或 null */
+function payConfirmDialog(due, payment, editing, laterLabel) {
+  const st = M.data.settings, tr = isTransferPay(st, payment);
   return new Promise(res => {
-    let v = null;
-    const m = modal({ title: '確認收款',
+    let v = null, pick = '';
+    const m = modal({ title: tr ? '轉帳收款' : '確認收款',
       body: `<div class="spec" style="border-top:1px solid var(--ink)"><span>付款方式</span><span style="font-size:18px">${esc(payment)}</span></div>
         <div class="spec"><span>應收金額</span><span class="n" style="font-size:34px;font-weight:300">${money(due)}</span></div>
-        <p style="margin:18px 0 6px;font-size:16px">請確認已收到客人的 <b>${esc(payment)}</b> 款項 ${money(due)}。</p>
-        <p class="note">如果客人還沒完成付款（例如轉帳稍後才會入帳），可以先登記，但<b>要等按「確認收款」後才會計入</b>售出、營收並扣庫存。之後在「我的訂單」按「確認收款」，後台會標記確認人與時間。</p>`,
-      foot: `<button class="btn line" id="later">${editing ? '稍後確認' : '先登記，稍後確認'}</button><button class="btn pri" id="yes" style="flex:1">確認已收款</button>` });
-    $('#yes', m).onclick = () => { v = 'yes'; m.close(); };
-    $('#later', m).onclick = () => { v = 'later'; m.close(); };
+        ${tr ? `<div id="tblk">${transferBlock(st, due)}</div>
+          <label class="field" style="margin-top:16px"><span>對方轉帳帳號末三碼（看過客人的轉帳成功畫面後填寫）</span>
+            <input class="inp n" id="l3" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" placeholder="例如 123" style="font-size:22px;letter-spacing:.3em;max-width:180px"></label>`
+          : `<p style="margin:18px 0 6px;font-size:16px">請確認已收到客人的 <b>${esc(payment)}</b> 款項 ${money(due)}。</p>`}
+        <p class="note">${tr ? '轉帳一定要手動確認：確認客人轉帳成功（或帳戶已入帳）後，輸入對方帳號末三碼再按「確認已收款」。' : ''}如果客人還沒完成付款，可以先登記，但<b>要等確認收款後才會計入</b>售出、營收並扣庫存。之後在「我的訂單」按「確認收款」。</p>`,
+      foot: `<button class="btn line" id="later">${laterLabel || (editing ? '稍後確認' : '先登記，稍後確認')}</button><button class="btn pri" id="yes" style="flex:1">確認已收款</button>` });
+    const drawQr = () => { const q = $('#tqr', m); if (q) { const a = (st.transferAccounts || []).find(x => x.id === q.dataset.acc); if (a) fillQr(q, twqr(a, due)); } };
+    const bindAcc = () => $$('[data-ta]', m).forEach(b => b.onclick = () => { pick = b.dataset.ta; $('#tblk', m).innerHTML = transferBlock(st, due, pick); bindAcc(); drawQr(); });
+    if (tr) { bindAcc(); drawQr(); const l = $('#l3', m); l.oninput = () => { l.value = l.value.replace(/\D/g, '').slice(0, 3); }; }
+    $('#yes', m).onclick = () => {
+      if (tr) {
+        const l3 = $('#l3', m).value.trim(); if (!/^\d{3}$/.test(l3)) { toast('請輸入對方轉帳帳號的末三碼（3 位數字）', 'err'); $('#l3', m).focus(); return; }
+        const q = $('#tqr', m), a = q && (st.transferAccounts || []).find(x => x.id === q.dataset.acc);
+        v = { v: 'yes', last3: l3, account: a ? acctLabel(a) : '' };
+      } else v = { v: 'yes' };
+      m.close();
+    };
+    $('#later', m).onclick = () => { v = { v: 'later' }; m.close(); };
     m.onclose = () => res(v);
   });
 }
 async function confirmOrder(o) {
-  if (!await confirmBox('確認收款？', `${o.payment} ${money(o.collected)}（${fmtDT(o.time)}）。確認後後台會標記為「已確認收款」，並記錄是你確認的。`, '確認已收款')) return false;
-  try { const r = await api('apiConfirmPayment', M.sid, o.orderId); M.data.summary = r.summary; renderPending(); toast('已確認收款'); return true; }
+  let l3 = '', acct = '';
+  if (isTransferPay(M.data.settings, o.payment)) {
+    const c = await payConfirmDialog(o.collected, o.payment, true, '取消');
+    if (!c || c.v !== 'yes') return false; l3 = c.last3; acct = c.account;
+  } else if (!await confirmBox('確認收款？', `${o.payment} ${money(o.collected)}（${fmtDT(o.time)}）。確認後後台會標記為「已確認收款」，並記錄是你確認的。`, '確認已收款')) return false;
+  try { const r = await api('apiConfirmPayment', M.sid, o.orderId, l3, acct); M.data.summary = r.summary; renderPending(); toast('已確認收款'); return true; }
   catch (e) { if (!e.handled) toast(e.message, 'err'); return false; }
 }
 
@@ -2232,6 +2300,7 @@ function orderHTML(o, actions) {
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     ${o.items.map(i => `<div class="it">${esc(i.productName)} <span class="faint n">× ${i.qty}</span>${i.kind === '預購' ? '<span class="tag amb">預購</span>' : ''}</div>`).join('')}
     ${o.setsText ? `<div class="lab" style="margin-top:4px">${esc(o.setsText)}</div>` : ''}
+    ${o.transferLast3 ? `<div class="lab" style="margin-top:4px">轉帳末三碼 ${esc(o.transferLast3)}${o.transferAccount ? ' · 轉入 ' + esc(o.transferAccount) : ''}</div>` : ''}
     ${o.cashReceived !== '' && o.cashReceived != null ? `<div class="lab" style="margin-top:4px">實收 ${money(o.cashReceived)} · 找零 ${money(o.change)}</div>` : ''}
     ${o.customer || o.phone || o.address ? `<div class="lab" style="margin-top:4px">${esc([o.customer, o.phone, o.address].filter(Boolean).join(' · '))}</div>` : ''}
     ${o.confirmed && o.confirmedBy && !voided ? `<div class="lab" style="margin-top:4px;color:var(--ok)">✓ 收款已確認 · ${esc(o.confirmedBy)}${o.confirmedAt ? ' ' + fmtT(o.confirmedAt) : ''}</div>` : ''}
@@ -2615,7 +2684,7 @@ function vOrders() {
     ${list.slice(0, 600).map(o => `<tr class="${o.status === '作廢' ? 'void' : ''}"><td class="n" style="white-space:nowrap">${fmtDT(o.time)}<br><span class="lab">${esc(o.orderId)}</span></td>
       <td>${esc(o.staffName)}<br><span class="lab">${esc(o.device)}</span></td><td style="white-space:nowrap">${esc(o.sessionName)}</td>
       <td style="white-space:nowrap">${(itemsBy[o.orderId] || []).map(i => `${esc(i.productName)} <span class="faint n">×${i.qty}</span>${i.kind === '預購' ? ' <span class="tag amb">預購</span>' : ''}`).join('<br>')}</td>
-      <td class="r n">${Number(o.sets) || ''}</td><td class="r n">${money(o.total)}</td><td class="r n">${Number(o.preorderAmount) ? money(o.preorderAmount) : ''}</td><td style="white-space:nowrap">${esc(o.payment)}${o.payStatus && o.payStatus !== '已收款' ? `<br><span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${o.cashReceived !== '' && o.cashReceived != null ? `<br><span class="lab">實收 ${fmtN(o.cashReceived)}／找 ${fmtN(o.change)}</span>` : ''}</td>
+      <td class="r n">${Number(o.sets) || ''}</td><td class="r n">${money(o.total)}</td><td class="r n">${Number(o.preorderAmount) ? money(o.preorderAmount) : ''}</td><td style="white-space:nowrap">${esc(o.payment)}${o.transferLast3 ? `<br><span class="lab">末三碼 ${esc(o.transferLast3)}</span>` : ''}${o.payStatus && o.payStatus !== '已收款' ? `<br><span class="tag ${PAYTAG[o.payStatus] || ''}">${esc(o.payStatus)}</span>` : ''}${o.cashReceived !== '' && o.cashReceived != null ? `<br><span class="lab">實收 ${fmtN(o.cashReceived)}／找 ${fmtN(o.change)}</span>` : ''}</td>
       <td style="white-space:nowrap">${o.status === '作廢' ? '' : o.confirmed ? `<span class="tag ok">已確認</span><br><span class="lab">${esc(o.confirmedBy || '—')}${o.confirmedAt ? ' ' + fmtDT(o.confirmedAt) : ''}</span>` : `<span class="tag amb">未確認</span><br><button class="btn sm line" data-acf="${esc(o.orderId)}" style="margin-top:4px">標記已確認</button>`}</td>
       <td style="min-width:200px;max-width:300px">${esc([o.customer, o.phone].filter(Boolean).join(' '))}${o.address ? `<br><span class="faint">${esc(o.address)}</span>` : ''}${o.note ? `<br><span class="faint">${esc(o.note)}</span>` : ''}${o.editedAt ? `<br><span class="tag">已修改 ${fmtDT(o.editedAt)}</span>` : ''}</td>
       <td class="r">${o.status === '作廢' ? '<span class="tag">已作廢</span>' : `<button class="btn sm danger" data-void="${esc(o.orderId)}">作廢</button>`}</td></tr>`).join('') || '<tr><td colspan="11" class="faint" style="text-align:center;padding:48px">沒有符合的訂單</td></tr>'}
@@ -2624,7 +2693,18 @@ function vOrders() {
   $('#fs').onchange = e => { A.staff = e.target.value; vOrders(); };
   $('#fss').onchange = e => { A.sess = e.target.value; vOrders(); };
   $('#fc').onchange = e => { A.conf = e.target.value; vOrders(); };
-  $$('[data-acf]').forEach(x => x.onclick = async () => { if (await confirmBox('標記為已確認收款？', `訂單 ${x.dataset.acf}。會記錄為由你（${A.d.me.email}）確認。`, '確認')) act(() => api('apiAdminConfirm', x.dataset.acf), '已標記確認'); });
+  $$('[data-acf]').forEach(x => x.onclick = async () => {
+    const o = A.d.orders.find(r => r.orderId === x.dataset.acf) || {};
+    if (o.payment && o.payment === (A.d.settings.transferName || '轉帳') && Number(o.collected) > 0) {
+      const m = modal({ title: '確認轉帳收款', body: `<p style="margin:0 0 14px">訂單 ${esc(o.orderId)} · ${money(o.collected)}<br><span class="faint">確認帳戶已入帳後，輸入對方轉帳帳號末三碼。會記錄為由你（${esc(A.d.me.email)}）確認。</span></p>
+        <label class="field"><span>對方帳號末三碼</span><input class="inp n" id="al3" inputmode="numeric" maxlength="3" style="max-width:160px;font-size:20px;letter-spacing:.3em"></label>`,
+        foot: '<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="ago">確認已收款</button>' });
+      $('#al3', m).focus();
+      $('#ago', m).onclick = () => { const v = $('#al3', m).value.trim(); if (!/^\d{3}$/.test(v)) return toast('請輸入 3 位數字', 'err'); m.close(); act(() => api('apiAdminConfirm', o.orderId, v), '已標記確認'); };
+      return;
+    }
+    if (await confirmBox('標記為已確認收款？', `訂單 ${x.dataset.acf}。會記錄為由你（${A.d.me.email}）確認。`, '確認')) act(() => api('apiAdminConfirm', x.dataset.acf), '已標記確認');
+  });
   const qi = $('#q'); qi.oninput = () => { A.q = qi.value; clearTimeout(qi._t); qi._t = setTimeout(() => { vOrders(); const n = $('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   $$('[data-void]').forEach(x => x.onclick = async () => {
     if (await confirmBox('作廢這筆訂單？', `訂單 ${x.dataset.void} 會標記為作廢，現貨件數退回原出貨倉儲。`, '作廢', true)) act(() => api('apiVoidOrder', x.dataset.void), '已作廢並退回庫存');
@@ -3052,9 +3132,46 @@ function vSystem() {
         <p class="note">金鑰只存在雲端函式讀得到的地方，網頁與後台都看不到。付款結果通知網址（ReturnURL）會使用上方的「綠界付款函式網址」。${s.salesUrl && s.apiUrl ? '' : '<b style="color:var(--red)">請先填入網站網址與綠界付款函式網址。</b>'}<br>建議先用測試環境完整跑一次，再切換到正式並填入綠界特店後台的正式金鑰。</p>
       </div>
     </div>
+    <div class="box" style="max-width:860px"><h3>轉帳收款帳戶<span class="sp"></span><button class="btn sm pri" id="taAdd" type="button">＋ 新增帳戶</button></h3>
+      <div id="taList"></div>
+      <label class="field" style="max-width:320px;margin-top:16px"><span>轉帳的付款方式名稱（要和「銷售 App → 付款方式」裡的名稱一樣）</span><input class="inp" id="taName" value="${esc(s.transferName || '轉帳')}"></label>
+      <button class="btn pri" id="taSave" type="button">儲存轉帳設定</button>
+      <p class="note">客人選這個付款方式時，手機會顯示預設帳戶的轉帳 QR code（銀行 App 掃碼後自動帶入銀行與帳號，多數 App 也會帶入金額）。轉帳一律要店員手動確認：看過客人轉帳成功畫面後，輸入對方帳號末三碼才會計入。建議使用專門收款的帳戶。</p>
+    </div>
     <div class="box" style="max-width:860px"><h3>資料位置（Firebase 主控台）</h3>
       ${[['Firestore 資料', L.console], ['PDF 檔案', L.storage]].map(([t, u]) => `<div class="linkrow"><span style="width:110px">${t}</span><code>${esc(u || '—')}</code>${u ? `<a class="btn sm line" href="${esc(u)}" target="_blank" rel="noopener">開啟 ↗</a>` : ''}</div>`).join('')}
     </div>`;
+  let accts = JSON.parse(JSON.stringify(s.transferAccounts || []));
+  const drawTa = () => {
+    $('#taList').innerHTML = accts.length ? `<table class="t"><thead><tr><th>銀行</th><th>帳號</th><th>戶名</th><th>預設</th><th></th></tr></thead><tbody>${accts.map((a, i) => `<tr>
+      <td style="white-space:nowrap">${esc(a.bankCode)} ${esc(a.bankName)}</td><td class="n">${esc(a.account)}</td><td>${esc(a.holder || '—')}</td>
+      <td>${a.isDefault ? '<span class="tag ok">預設</span>' : `<button class="btn sm line" data-tdef="${i}" type="button">設為預設</button>`}</td>
+      <td class="r" style="white-space:nowrap"><button class="btn sm line" data-tq="${i}" type="button">QR 預覽</button> <button class="btn sm line" data-ted="${i}" type="button">編輯</button> <button class="btn sm danger" data-trm="${i}" type="button">刪除</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="faint" style="padding:18px 0">還沒有帳戶。按「＋ 新增帳戶」填入銀行代碼與帳號。</p>';
+    $$('[data-tdef]').forEach(b => b.onclick = () => { accts.forEach((a, i) => a.isDefault = i === +b.dataset.tdef); drawTa(); });
+    $$('[data-trm]').forEach(b => b.onclick = () => { accts.splice(+b.dataset.trm, 1); if (accts.length && !accts.some(a => a.isDefault)) accts[0].isDefault = true; drawTa(); });
+    $$('[data-ted]').forEach(b => b.onclick = () => taEdit(+b.dataset.ted));
+    $$('[data-tq]').forEach(b => b.onclick = () => { const a = accts[+b.dataset.tq]; const m = modal({ title: 'QR 預覽（金額 NT$1）', body: `<div class="qrbig" id="tpq"></div><p class="note">用你的銀行 App「掃碼轉帳」掃描，確認銀行、帳號和金額（NT$1）有正確帶入。<b>只是測試，不用真的轉出。</b></p><p class="lab" style="word-break:break-all">${esc(twqr(a, 1))}</p>` }); fillQr($('#tpq', m), twqr(a, 1)); });
+  };
+  const taEdit = i => {
+    const a = i >= 0 ? accts[i] : { bankCode: '', bankName: '', account: '', holder: '' };
+    const m = modal({ title: i >= 0 ? '編輯轉帳帳戶' : '新增轉帳帳戶',
+      body: `<div class="two"><label class="field"><span>銀行代碼（3 碼）</span><input class="inp n" id="tbc" inputmode="numeric" maxlength="3" value="${esc(a.bankCode)}" placeholder="例如 822"></label>
+        <label class="field"><span>銀行名稱</span><input class="inp" id="tbn" value="${esc(a.bankName)}" placeholder="例如 中國信託"></label></div>
+        <label class="field"><span>帳號（只填數字）</span><input class="inp n" id="tac" inputmode="numeric" value="${esc(a.account)}"></label>
+        <label class="field"><span>戶名（顯示給客人核對，可留空）</span><input class="inp" id="tho" value="${esc(a.holder)}"></label>`,
+      foot: '<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="tok">完成</button>' });
+    $('#tok', m).onclick = () => {
+      const x = { id: a.id, bankCode: $('#tbc', m).value.replace(/\D/g, ''), bankName: $('#tbn', m).value.trim(), account: $('#tac', m).value.replace(/\D/g, ''), holder: $('#tho', m).value.trim(), isDefault: !!a.isDefault };
+      if (!/^\d{3}$/.test(x.bankCode)) return toast('銀行代碼要是 3 位數字', 'err');
+      if (x.account.length < 6 || x.account.length > 16) return toast('帳號要是 6–16 位數字', 'err');
+      if (i >= 0) accts[i] = x; else { if (!accts.length) x.isDefault = true; accts.push(x); }
+      m.close(); drawTa(); toast('記得按「儲存轉帳設定」');
+    };
+  };
+  drawTa();
+  $('#taAdd').onclick = () => taEdit(-1);
+  $('#taSave').onclick = () => act(() => api('apiSaveSettings', { transferAccounts: accts, transferName: $('#taName').value.trim() || '轉帳' }), '轉帳設定已儲存');
   $('#fillUrl').onclick = () => { $('#su').value = SITE; if (PAY_URL) $('#apiu').value = PAY_URL; toast('已填入，請按儲存'); };
   $('#save').onclick = () => act(() => { const su = $('#su').value.trim(); return api('apiSaveSettings', { salesUrl: su, adminUrl: su ? su + (su.includes('?') ? '&' : '?') + 'page=admin' : '', apiUrl: $('#apiu').value.trim(), lowStock: Number($('#low').value) || 0, defaultLocationId: $('#dloc').value }); }, '已儲存');
   const sw = $('#ecOn'); sw.onclick = () => { on = !on; sw.classList.toggle('on', on); };
