@@ -1137,7 +1137,47 @@ window.createFirestoreDB = function (cfg) {
       user = r.user;
       return this.email();
     },
-    async signOut() { await A.signOut(auth); const r = await A.signInAnonymously(auth); user = r.user; },
+    async signOut() { try { await this.lock(); } catch (e) {} await A.signOut(auth); const r = await A.signInAnonymously(auth); user = r.user; },
+
+    /* ---------- 後台密碼（每位管理者自己的密碼；資料庫規則驗證，網頁只送雜湊值） ---------- */
+    async _hash(pw) {
+      const h = async t => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))).map(b => b.toString(16).padStart(2, '0')).join('');
+      const proof = await h('ish-admin|' + this.email() + '|' + pw);
+      return { proof, h2: await h(proof) };
+    },
+    /** { hasPw, unlocked }：hasPw 由能不能讀到自己的解鎖紀錄與規則回應判斷 */
+    async pwStatus() {
+      const em = this.email(); if (!em) return { hasPw: false, unlocked: false };
+      const st = await F.getDoc(F.doc(db, 'adminpwSet', em)).catch(() => null);
+      const hasPw = !!(st && st.exists());
+      let unlocked = false;
+      if (hasPw && sessionStorage.getItem('ish.unlock') === user.uid) {
+        const u = await F.getDoc(F.doc(db, 'unlock', user.uid)).catch(() => null);
+        const at = u && u.exists() && u.data().at; unlocked = !!(at && at.toDate && Date.now() - at.toDate().getTime() < 11.5 * 3600e3);
+      }
+      return { hasPw, unlocked };
+    },
+    async setPassword(pw) {
+      const em = this.email(), { h2 } = await this._hash(pw);
+      const b = F.writeBatch(db);
+      b.set(F.doc(db, 'adminpw', em), { h2, at: F.serverTimestamp() });
+      b.set(F.doc(db, 'adminpwSet', em), { at: F.serverTimestamp() });
+      await b.commit();
+      return this.unlock(pw);
+    },
+    async unlock(pw) {
+      const { proof } = await this._hash(pw);
+      try { await F.setDoc(F.doc(db, 'unlock', user.uid), { proof, email: this.email(), at: F.serverTimestamp() }); }
+      catch (e) { if (/permission/i.test(String(e.code || e.message))) throw new Error('密碼不正確'); throw e; }
+      sessionStorage.setItem('ish.unlock', user.uid);
+      return true;
+    },
+    async lock() { sessionStorage.removeItem('ish.unlock'); if (user) await F.deleteDoc(F.doc(db, 'unlock', user.uid)).catch(() => {}); },
+    async resetPassword(email) {
+      const em = String(email).toLowerCase(), b = F.writeBatch(db);
+      b.delete(F.doc(db, 'adminpw', em)); b.delete(F.doc(db, 'adminpwSet', em)); await b.commit();
+    },
+    async pwList() { const s = await F.getDocs(F.collection(db, 'adminpwSet')).catch(() => null); return s ? s.docs.map(d => d.id) : []; },
     onChange(f) { changeCbs.push(f); },
     onError(f) { errorCbs.push(f); },
   };
@@ -1349,6 +1389,8 @@ html.lock,html.lock body{overflow:hidden}
 .mtx td.cur,.mtx th.cur{background:var(--soft);font-weight:500}
 .names{border-top:1px solid var(--ink)}
 p.err{color:var(--red)}
+.pbar{height:6px;background:var(--bg2,#f1efe9);margin:4px 0 2px}.pbar i{display:block;height:100%;background:var(--ac)}
+.t tr.tot td{border-top:1px solid var(--ink);font-weight:500}
 .sharebox{display:flex;gap:22px;align-items:flex-start;padding:18px 0 22px;border-bottom:1px solid var(--line);margin-bottom:8px}
 .sharebox .qr{width:132px;height:132px;flex:none;border:1px solid var(--line);padding:8px;background:#fff}
 .sharebox .qr svg{width:100%;height:100%;display:block}
@@ -2299,7 +2341,7 @@ function renderPayPage(root, info, key) {
 /* ============================================================
  * 後台：用 Google 帳號辨識，管理者名單內才能進入
  * ============================================================ */
-const A = { view: store.get('aview', 'dash'), range: 'event', staff: '', sess: '*', q: '', conf: '' };
+const A = { view: store.get('aview', 'dash'), range: 'event', prange: 'event', staff: '', sess: '*', q: '', conf: '' };
 const VIEWS = [['dash', '總覽'], ['orders', '訂單'], ['products', '品項與組合'], ['stock', '庫存與倉儲'], ['event', '活動與目標'], ['people', '人員與權限'], ['appset', '銷售 App'], ['materials', '簡介資料'], ['system', '系統']];
 
 /* 後台登入：Firebase「使用 Google 帳號登入」（登入狀態會記住，直到按「登出」） */
@@ -2323,6 +2365,42 @@ async function adminLogout() {
   try { await DB.signOut(); } catch (e) {}
   adminLogin('已登出。');
 }
+/* 後台密碼：set＝第一次設定；unlock＝每次打開後台輸入 */
+function pwScreen(mode, msg = '') {
+  const em = DB.email(), set = mode === 'set';
+  centerScreen(`${logoHTML(store.get('lastSettings'), 22)}
+    <h2 style="font-size:34px;margin:40px 0 10px">${set ? '設定後台密碼' : '輸入後台密碼'}</h2>
+    <p class="muted" style="margin:0 0 22px">${set ? `第一次進入後台，請為 <b>${esc(em)}</b> 設定一組後台密碼（至少 8 個字）。之後每次打開後台，除了 Google 帳號，還要輸入這組密碼。` : `<b>${esc(em)}</b><br>後台需要 Google 帳號權限＋你的後台密碼才能進入。`}</p>
+    <form id="pwf" style="max-width:340px;margin:0 auto;text-align:left">
+      <label class="lab">${set ? '新密碼' : '後台密碼'}</label><input class="inp" id="pw1" type="password" autocomplete="${set ? 'new-password' : 'current-password'}" style="margin:6px 0 14px">
+      ${set ? '<label class="lab">再輸入一次</label><input class="inp" id="pw2" type="password" autocomplete="new-password" style="margin:6px 0 14px">' : ''}
+      <button class="btn pri" style="width:100%" id="pwgo">${set ? '設定並進入後台' : '進入後台'}</button>
+      <p id="pwmsg" style="margin:14px 0 0;font-size:14px;color:var(--red)">${esc(msg)}</p>
+    </form>
+    ${set ? '' : '<p class="note" style="max-width:420px;margin:22px auto 0;text-align:left">忘記密碼：請其他管理者到「人員與權限 → 管理者」幫你按「重設密碼」，再重新登入設定新密碼。如果只有你一位管理者，請到 Firebase 控制台的資料庫，刪除 adminpw 和 adminpwSet 裡你的 Email 那筆資料。</p>'}
+    <p style="margin-top:18px"><a href="#" id="pwout">換一個 Google 帳號</a></p>`);
+  $('#pw1').focus();
+  $('#pwout').onclick = e => { e.preventDefault(); adminLogout(); };
+  $('#pwf').onsubmit = async e => {
+    e.preventDefault();
+    const a = $('#pw1').value, el = $('#pwmsg'), btn = $('#pwgo');
+    if (set) { if (a.length < 8) { el.textContent = '密碼至少要 8 個字'; return; } if (a !== $('#pw2').value) { el.textContent = '兩次輸入的密碼不一樣'; return; } }
+    else if (!a) { el.textContent = '請輸入密碼'; return; }
+    btn.disabled = true; el.textContent = '';
+    try { await (set ? DB.setPassword(a) : DB.unlock(a)); startAdmin(); }
+    catch (er) { btn.disabled = false; el.textContent = er.message === '密碼不正確' ? '密碼不正確' : '失敗：' + (er.message || er); $('#pw1').select(); }
+  };
+}
+function changePwDialog() {
+  const m = modal({ title: '變更我的後台密碼',
+    body: `<label class="lab">新密碼（至少 8 個字）</label><input class="inp" id="np1" type="password" autocomplete="new-password" style="margin:6px 0 14px">
+      <label class="lab">再輸入一次</label><input class="inp" id="np2" type="password" autocomplete="new-password" style="margin:6px 0 4px">`,
+    foot: '<span class="sp"></span><button class="btn line" data-close>取消</button><button class="btn pri" id="npgo">變更密碼</button>' });
+  $('#npgo', m).onclick = async () => {
+    const a = $('#np1', m).value; if (a.length < 8) return toast('密碼至少要 8 個字', 'err'); if (a !== $('#np2', m).value) return toast('兩次輸入的密碼不一樣', 'err');
+    try { await DB.setPassword(a); m.close(); toast('密碼已變更'); } catch (e) { toast('變更失敗：' + (e.message || e), 'err'); }
+  };
+}
 function firstRunScreen(email) {
   centerScreen(`${logoHTML(store.get('lastSettings'), 22)}
     <h2 style="font-size:34px;margin:40px 0 10px">建立系統</h2>
@@ -2333,12 +2411,22 @@ function firstRunScreen(email) {
 }
 async function startAdmin() {
   document.body.classList.remove('phone');
-  onErrCode = m => { if (REMOTE && m === 'NO_GOOGLE') { adminLogin(); return true; } return false; };
+  onErrCode = m => {
+    if (REMOTE && m === 'NO_GOOGLE') { adminLogin(); return true; }
+    // 後台密碼逾時或被重設：資料庫規則會拒絕寫入 → 回到輸入密碼畫面
+    if (REMOTE && /insufficient permissions|permission-denied|PERMISSION_DENIED/i.test(m) && DB.email()) { DB.lock().catch(() => {}); pwScreen('unlock', '後台已鎖定（超過 12 小時或密碼已被重設），請重新輸入密碼。'); return true; }
+    return false;
+  };
   if (REMOTE) {
     centerScreen('<div class="spin"></div>');
     try { await dbReady(); } catch (e) { return errorScreen(e); }
     if (!DB.email()) return adminLogin();
-    if (!DB.admins().length) return firstRunScreen(DB.email());
+    const em = DB.email(), list = DB.admins();
+    if (list.includes(em) || (!list.length && em === OWNER_EMAIL)) {
+      const ps = await DB.pwStatus().catch(() => ({ hasPw: false, unlocked: false }));
+      if (!ps.unlocked) return pwScreen(ps.hasPw ? 'unlock' : 'set');
+    }
+    if (!list.length) return firstRunScreen(em);
   }
   loadAdmin().catch(e => {
     if (e.handled) return;
@@ -2710,9 +2798,40 @@ function vEvent() {
 }
 
 /* ---- 人員與權限 ---- */
+/* 個人績效：只算已確認收款（已計入）的訂單 */
+function perfRows(d, range) {
+  const [a, b] = rangeOf(range), inR = o => o.time >= a && o.time < b && (range !== 'event' || d.sessions.some(s => s.id === o.sessionId));
+  const orders = d.orders.filter(inR), byId = {};
+  const key = o => o.staffId || ('n:' + o.staffName);
+  d.staff.forEach(u => byId[u.id] = { id: u.id, name: u.name, active: u.active, n: 0, units: 0, rev: 0, pre: 0, unconf: 0, voids: 0, last: 0 });
+  orders.forEach(o => {
+    const k = key(o); const r = byId[k] || (byId[k] = { id: k, name: o.staffName || '（未知）', active: false, n: 0, units: 0, rev: 0, pre: 0, unconf: 0, voids: 0, last: 0 });
+    if (o.status === '作廢') { r.voids++; return; }
+    if (!o.confirmed) { r.unconf++; return; }
+    r.n++; r.units += Number(o.units) || 0; r.rev += Number(o.total) || 0; r.pre += Number(o.preUnits) || 0; r.last = Math.max(r.last, o.time);
+  });
+  return Object.values(byId).filter(r => r.active || r.n || r.unconf || r.voids).sort((x, y) => y.rev - x.rev || y.units - x.units);
+}
+function perfBox(d) {
+  const st = d.settings, rows = perfRows(d, A.prange), tot = rows.reduce((t, r) => ({ n: t.n + r.n, units: t.units + r.units, rev: t.rev + r.rev, pre: t.pre + r.pre, unconf: t.unconf + r.unconf }), { n: 0, units: 0, rev: 0, pre: 0, unconf: 0 });
+  const max = Math.max(1, ...rows.map(r => r.rev));
+  return `<div class="box"><h3>個人績效<span class="sp"></span>
+      <div class="seg" id="prg">${[['event', '活動期間'], ['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['all', '全部']].map(([k, t]) => `<button data-r="${k}" class="${A.prange === k ? 'on' : ''}">${t}</button>`).join('')}</div></h3>
+    <div class="scroll"><table class="t perf" style="min-width:860px"><thead><tr><th>人員</th><th class="r">訂單數</th><th class="r">售出（${esc(st.unit)}）</th><th class="r">營收</th><th style="width:22%"></th><th class="r">客單價</th><th class="r">預購（${esc(st.unit)}）</th><th class="r">未確認</th><th>最近一筆</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td><a href="#" data-ps="${esc(r.name)}" style="white-space:nowrap">${esc(r.name)}</a>${r.active ? '' : ' <span class="tag">停用</span>'}</td>
+      <td class="r n">${fmtN(r.n)}</td><td class="r n">${fmtN(r.units)}</td><td class="r n">${money(r.rev)}</td>
+      <td><div class="pbar"><i style="width:${(r.rev / max * 100).toFixed(1)}%"></i></div><span class="lab">${tot.rev ? Math.round(r.rev / tot.rev * 100) : 0}%</span></td>
+      <td class="r n">${r.n ? money(Math.round(r.rev / r.n)) : '—'}</td><td class="r n">${fmtN(r.pre)}</td>
+      <td class="r n">${r.unconf ? `<span style="color:var(--amb)">${fmtN(r.unconf)}</span>` : '0'}</td>
+      <td class="n faint" style="white-space:nowrap">${r.last ? fmtDT(r.last) : '—'}</td></tr>`).join('') || '<tr><td colspan="9" class="faint" style="text-align:center;padding:40px">這段期間還沒有訂單</td></tr>'}
+    ${rows.length ? `<tr class="tot"><td>合計</td><td class="r n">${fmtN(tot.n)}</td><td class="r n">${fmtN(tot.units)}</td><td class="r n">${money(tot.rev)}</td><td></td><td class="r n">${tot.n ? money(Math.round(tot.rev / tot.n)) : '—'}</td><td class="r n">${fmtN(tot.pre)}</td><td class="r n">${fmtN(tot.unconf)}</td><td></td></tr>` : ''}
+    </tbody></table></div>
+    <p class="note">只計入已確認收款的訂單；「未確認」是還沒確認收款、尚未計入的筆數。點人員名稱可以看他的訂單。</p></div>`;
+}
 function vPeople() {
   const d = A.d, su = siteUrl(d.settings);
-  $('#am').innerHTML = head('人員與權限', '人員與權限', '銷售人員在手機上選名字就能登記，不需要密碼；後台只有下方「管理者」名單裡的 Google 帳號能進入。')
+  $('#am').innerHTML = head('人員與權限', '人員與權限', '銷售人員用共用連結選名字登記，每支手機綁定一個名字；後台只有「管理者」名單裡的 Google 帳號，並輸入自己的後台密碼才能進入。')
+    + perfBox(d)
     + `<div class="box"><h3>銷售人員<span class="sp"></span><button class="btn sm pri" id="addU">＋ 新增人員</button></h3>
       <div class="sharebox">
         <div class="qr" id="shareQr"></div>
@@ -2730,10 +2849,14 @@ function vPeople() {
       <p class="note">停用人員後，他的手機會回到選名字畫面，過去訂單保留。</p>
     </div>
     <div class="box"><h3>管理者<span class="sp"></span><span class="lab">Google 帳號</span></h3>
-      ${d.admins.map(e => `<div class="linkrow"><span style="flex:1">${esc(e)}${e === d.owner ? ' <span class="tag ac">擁有者</span>' : ''}${e === d.me.email ? ' <span class="tag">你</span>' : ''}</span>${e !== d.owner && e !== d.me.email ? `<button class="btn sm danger" data-rm="${esc(e)}">移除</button>` : ''}</div>`).join('')}
+      ${d.admins.map(e => `<div class="linkrow"><span style="flex:1">${esc(e)}${e === d.owner ? ' <span class="tag ac">擁有者</span>' : ''}${e === d.me.email ? ' <span class="tag">你</span>' : ''}</span>
+        <span class="lab" data-pws="${esc(e)}"></span>
+        ${e === d.me.email ? (REMOTE ? '<button class="btn sm line" id="chpw">變更我的密碼</button>' : '') : `${REMOTE ? `<button class="btn sm line" data-rp="${esc(e)}" style="display:none">重設密碼</button>` : ''}${e !== d.owner ? `<button class="btn sm danger" data-rm="${esc(e)}">移除</button>` : ''}`}</div>`).join('')}
       <div class="row" style="margin-top:18px"><input class="inp" id="ae" type="email" placeholder="name@gmail.com" style="max-width:360px"><button class="btn pri" id="addA">加入管理者</button></div>
-      <p class="note">加入後，對方用自己的 Google 帳號打開後台網址、按「使用 Google 帳戶登入」即可。Google Cloud 的登入設定還在測試模式時，也要把這個帳號加進「測試使用者」。</p>
+      <p class="note">加入後，對方用自己的 Google 帳號打開後台網址、按「使用 Google 帳戶登入」，第一次會要求他設定自己的後台密碼。Google Cloud 的登入設定還在測試模式時，也要把這個帳號加進「測試使用者」。</p>
     </div>`;
+  $$('#prg button').forEach(x => x.onclick = () => { A.prange = x.dataset.r; vPeople(); });
+  $$('[data-ps]').forEach(x => x.onclick = e => { e.preventDefault(); A.view = 'orders'; A.staff = x.dataset.ps; A.range = A.prange; A.sess = '*'; A.conf = ''; store.set('aview', 'orders'); renderAdmin(); });
   $('#addU').onclick = () => staffEditor();
   $$('[data-eu]').forEach(b => b.onclick = () => staffEditor(d.staff.find(u => u.id === b.dataset.eu)));
   $$('[data-cp]').forEach(b => b.onclick = () => copy(b.dataset.cp));
@@ -2741,6 +2864,15 @@ function vPeople() {
   $$('[data-ub]').forEach(b => b.onclick = async () => { if (await confirmBox('解除綁定？', `「${b.dataset.un}」目前綁定的手機會回到選名字畫面，之後可以用新手機重新選這個名字。`, '解除綁定')) act(() => api('apiUnbindStaff', b.dataset.ub), '已解除綁定'); });
   $$('[data-rm]').forEach(b => b.onclick = async () => { if (await confirmBox('移除管理者？', `${b.dataset.rm} 將無法進入後台。`, '移除', true)) act(() => api('apiRemoveAdmin', b.dataset.rm), '已移除'); });
   $('#addA').onclick = () => { const e = $('#ae').value.trim(); if (!e) return; act(() => api('apiAddAdmin', e), '已加入管理者'); };
+  if (REMOTE) {
+    const cp = $('#chpw'); if (cp) cp.onclick = changePwDialog;
+    DB.pwList().then(set => {
+      $$('[data-pws]').forEach(x => { const has = set.includes(x.dataset.pws); x.textContent = has ? '已設定密碼' : '尚未設定密碼'; x.style.color = has ? '' : 'var(--amb)'; });
+      $$('[data-rp]').forEach(b => { if (set.includes(b.dataset.rp)) b.style.display = ''; b.onclick = async () => {
+        if (!await confirmBox('重設密碼？', `${b.dataset.rp} 的後台密碼會被清除，他下次登入後台時要重新設定一組新密碼（他目前開著的後台最晚 12 小時內會被鎖定）。`, '重設密碼', true)) return;
+        try { await DB.resetPassword(b.dataset.rp); toast('已重設，對方下次登入時設定新密碼'); vPeople(); } catch (e) { toast('重設失敗：' + (e.message || e), 'err'); } }; });
+    });
+  }
 }
 async function copy(t) { try { await navigator.clipboard.writeText(t); toast('已複製'); } catch (e) { modal({ title: '請手動複製', body: `<textarea class="inp" readonly style="min-height:80px">${esc(t)}</textarea>` }); } }
 function staffEditor(u) {
